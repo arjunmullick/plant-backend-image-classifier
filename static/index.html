@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Plant Disease Classifier</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="header-content">
+            <div class="logo">
+                <svg class="logo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                    <path d="M2 17l10 5 10-5"/>
+                    <path d="M2 12l10 5 10-5"/>
+                </svg>
+                <h1>Plant Disease Classifier</h1>
+            </div>
+            <div class="header-status">
+                <span class="status-indicator" id="apiStatus">
+                    <span class="status-dot"></span>
+                    <span class="status-text">Checking...</span>
+                </span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <!-- Mode Selection Tabs -->
+        <div class="tabs-container">
+            <div class="tabs">
+                <button class="tab active" data-mode="full">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"/>
+                        <path d="M12 6v6l4 2"/>
+                    </svg>
+                    Full Analysis
+                </button>
+                <button class="tab" data-mode="species">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 2a10 10 0 0 1 10 10c0 5.52-4.48 10-10 10S2 17.52 2 12"/>
+                        <path d="M12 2v10l7 4"/>
+                    </svg>
+                    Species Only
+                </button>
+                <button class="tab" data-mode="disease">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
+                    </svg>
+                    Disease Only
+                </button>
+                <button class="tab" data-mode="batch">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="3" width="7" height="7"/>
+                        <rect x="14" y="3" width="7" height="7"/>
+                        <rect x="14" y="14" width="7" height="7"/>
+                        <rect x="3" y="14" width="7" height="7"/>
+                    </svg>
+                    Batch (10 max)
+                </button>
+                <button class="tab" data-mode="compare">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="3" width="8" height="18" rx="1"/>
+                        <rect x="13" y="3" width="8" height="18" rx="1"/>
+                        <path d="M7 8h0M7 12h0M7 16h0"/>
+                        <path d="M17 8h0M17 12h0M17 16h0"/>
+                    </svg>
+                    Compare Models
+                </button>
+            </div>
+        </div>
+
+        <!-- Upload Section -->
+        <div class="upload-section">
+            <div class="upload-area" id="uploadArea">
+                <div class="upload-content">
+                    <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                        <polyline points="17 8 12 3 7 8"/>
+                        <line x1="12" y1="3" x2="12" y2="15"/>
+                    </svg>
+                    <h3>Drop your plant image here</h3>
+                    <p>or click to browse</p>
+                    <span class="upload-hint">Supports JPG, PNG (max 10MB)</span>
+                </div>
+                <input type="file" id="fileInput" accept="image/*" hidden>
+                <input type="file" id="batchFileInput" accept="image/*" multiple hidden>
+            </div>
+
+            <!-- Preview Area -->
+            <div class="preview-area" id="previewArea" style="display: none;">
+                <div class="preview-header">
+                    <h3>Selected Image<span id="imageCount"></span></h3>
+                    <button class="btn-clear" id="clearBtn">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="18" y1="6" x2="6" y2="18"/>
+                            <line x1="6" y1="6" x2="18" y2="18"/>
+                        </svg>
+                        Clear
+                    </button>
+                </div>
+                <div class="preview-images" id="previewImages"></div>
+            </div>
+
+            <!-- Options -->
+            <div class="options-panel" id="optionsPanel">
+                <div class="option-group">
+                    <label class="option-label">
+                        <input type="checkbox" id="includeTreatment" checked>
+                        <span class="checkbox-custom"></span>
+                        Include Treatment Recommendations
+                    </label>
+                </div>
+                <div class="option-group">
+                    <label class="option-label">
+                        <input type="checkbox" id="includeExplainability" checked>
+                        <span class="checkbox-custom"></span>
+                        Include Model Explainability
+                    </label>
+                </div>
+                <div class="option-group">
+                    <label class="option-label-inline">Region (optional):</label>
+                    <select id="regionSelect" class="select-input">
+                        <option value="">No region filter</option>
+                        <option value="US-CA">California, USA</option>
+                        <option value="US-FL">Florida, USA</option>
+                        <option value="US-TX">Texas, USA</option>
+                        <option value="EU">European Union</option>
+                        <option value="IN-MH">Maharashtra, India</option>
+                        <option value="IN-KA">Karnataka, India</option>
+                        <option value="AU">Australia</option>
+                    </select>
+                </div>
+                <div class="option-group disease-only-option" id="cropOption" style="display: none;">
+                    <label class="option-label-inline">Crop Type (for disease detection):</label>
+                    <select id="cropSelect" class="select-input">
+                        <option value="">Auto-detect</option>
+                        <option value="tomato">Tomato</option>
+                        <option value="potato">Potato</option>
+                        <option value="apple">Apple</option>
+                        <option value="corn">Corn</option>
+                        <option value="grape">Grape</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Analyze Button -->
+            <button class="btn-analyze" id="analyzeBtn" disabled>
+                <span class="btn-text">Analyze Plant</span>
+                <span class="btn-loading">
+                    <svg class="spinner" viewBox="0 0 24 24">
+                        <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" fill="none" stroke-dasharray="31.4" stroke-dashoffset="10"/>
+                    </svg>
+                    Analyzing...
+                </span>
+            </button>
+        </div>
+
+        <!-- Results Section -->
+        <div class="results-section" id="resultsSection" style="display: none;">
+            <div class="results-header">
+                <h2>Analysis Results</h2>
+                <div class="results-meta" id="resultsMeta"></div>
+            </div>
+
+            <!-- Error Display -->
+            <div class="error-container" id="errorContainer" style="display: none;">
+                <div class="error-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"/>
+                        <line x1="12" y1="8" x2="12" y2="12"/>
+                        <line x1="12" y1="16" x2="12.01" y2="16"/>
+                    </svg>
+                </div>
+                <div class="error-content">
+                    <h3 class="error-title">Analysis Failed</h3>
+                    <p class="error-message" id="errorMessage"></p>
+                    <button class="btn-retry" id="retryBtn">Try Again</button>
+                </div>
+            </div>
+
+            <!-- Single Result -->
+            <div class="result-cards" id="singleResult" style="display: none;">
+                <!-- Plant Identification Card -->
+                <div class="result-card plant-card">
+                    <div class="card-header">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 2v8m0 0c-2 0-4 1-4 4 0 2 2 6 4 8 2-2 4-6 4-8 0-3-2-4-4-4z"/>
+                            <path d="M12 10c2-4 6-4 8-2"/>
+                            <path d="M12 10c-2-4-6-4-8-2"/>
+                        </svg>
+                        <h3>Plant Identification</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="taxonomy-tree" id="taxonomyTree"></div>
+                        <div class="common-name" id="commonName"></div>
+                        <div class="alternatives" id="alternatives"></div>
+                    </div>
+                </div>
+
+                <!-- Health Assessment Card -->
+                <div class="result-card health-card">
+                    <div class="card-header">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
+                        </svg>
+                        <h3>Health Assessment</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="health-status" id="healthStatus"></div>
+                        <div class="disease-info" id="diseaseInfo"></div>
+                        <div class="symptoms-list" id="symptomsList"></div>
+                    </div>
+                </div>
+
+                <!-- Treatment Card -->
+                <div class="result-card treatment-card" id="treatmentCard" style="display: none;">
+                    <div class="card-header">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/>
+                        </svg>
+                        <h3>Treatment Recommendations</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="treatment-urgency" id="treatmentUrgency"></div>
+                        <div class="treatment-tabs">
+                            <button class="treatment-tab active" data-treatment="organic">Organic</button>
+                            <button class="treatment-tab" data-treatment="chemical">Chemical</button>
+                            <button class="treatment-tab" data-treatment="prevention">Prevention</button>
+                        </div>
+                        <div class="treatment-content" id="treatmentContent"></div>
+                        <div class="region-notes" id="regionNotes"></div>
+                    </div>
+                </div>
+
+                <!-- Explainability Card -->
+                <div class="result-card explain-card" id="explainCard" style="display: none;">
+                    <div class="card-header">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/>
+                            <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+                            <line x1="12" y1="17" x2="12.01" y2="17"/>
+                        </svg>
+                        <h3>Model Explainability</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="reasoning" id="modelReasoning"></div>
+                        <div class="confidence-notes" id="confidenceNotes"></div>
+                        <div class="key-features" id="keyFeatures"></div>
+                        <div class="uncertainty" id="uncertaintyFactors"></div>
+                        <div class="grad-cam-section" id="gradCamSection" style="display: none;">
+                            <h4>Attention Heatmap</h4>
+                            <img class="grad-cam-image" id="gradCamImage" alt="Grad-CAM visualization">
+                            <div class="focus-regions" id="focusRegions"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Batch Results -->
+            <div class="batch-results" id="batchResults" style="display: none;">
+                <div class="batch-summary" id="batchSummary"></div>
+                <div class="batch-grid" id="batchGrid"></div>
+            </div>
+        </div>
+
+        <!-- API Status Panel (collapsible) -->
+        <details class="api-panel">
+            <summary>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
+                </svg>
+                API Status & Details
+            </summary>
+            <div class="api-panel-content">
+                <div class="api-endpoints">
+                    <h4>Available Endpoints</h4>
+                    <div class="endpoint-list" id="endpointList">
+                        <div class="endpoint">
+                            <span class="method post">POST</span>
+                            <span class="path">/api/v1/classify</span>
+                            <span class="desc">Full classification</span>
+                        </div>
+                        <div class="endpoint">
+                            <span class="method post">POST</span>
+                            <span class="path">/api/v1/classify/species</span>
+                            <span class="desc">Species only</span>
+                        </div>
+                        <div class="endpoint">
+                            <span class="method post">POST</span>
+                            <span class="path">/api/v1/classify/disease</span>
+                            <span class="desc">Disease only</span>
+                        </div>
+                        <div class="endpoint">
+                            <span class="method post">POST</span>
+                            <span class="path">/api/v1/classify/batch</span>
+                            <span class="desc">Batch (10 max)</span>
+                        </div>
+                        <div class="endpoint">
+                            <span class="method get">GET</span>
+                            <span class="path">/api/v1/health</span>
+                            <span class="desc">Health check</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="api-models" id="apiModels">
+                    <h4>Loaded Models</h4>
+                    <div class="models-info">Loading...</div>
+                </div>
+            </div>
+        </details>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <p>Plant Disease Classifier API v0.1.0</p>
+        <a href="/docs" target="_blank">API Documentation</a>
+    </footer>
+
+    <!-- Toast Notifications -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

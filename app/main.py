@@ -16,10 +16,12 @@ Production:
 
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.openapi.utils import get_openapi
 
 from app.core.config import get_settings
@@ -153,10 +155,31 @@ app.include_router(health_router, prefix=settings.api_prefix)
 app.include_router(classify_router, prefix=settings.api_prefix)
 
 
-# Root endpoint
-@app.get("/", tags=["Root"])
+# Static files directory
+STATIC_DIR = Path(__file__).parent.parent / "static"
+
+
+# Root endpoint - serve the frontend
+@app.get("/", tags=["Root"], response_class=FileResponse)
 async def root():
-    """Root endpoint with API information."""
+    """Serve the frontend web application."""
+    index_path = STATIC_DIR / "index.html"
+    if index_path.exists():
+        return FileResponse(index_path)
+    # Fallback to API info if no frontend
+    return JSONResponse({
+        "name": settings.app_name,
+        "version": settings.app_version,
+        "documentation": "/docs",
+        "health_check": f"{settings.api_prefix}/health",
+        "classification_endpoint": f"{settings.api_prefix}/classify"
+    })
+
+
+# API info endpoint
+@app.get("/api", tags=["Root"])
+async def api_info():
+    """API information endpoint."""
     return {
         "name": settings.app_name,
         "version": settings.app_version,
@@ -164,6 +187,11 @@ async def root():
         "health_check": f"{settings.api_prefix}/health",
         "classification_endpoint": f"{settings.api_prefix}/classify"
     }
+
+
+# Mount static files (must be after specific routes)
+if STATIC_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
 # Custom OpenAPI schema

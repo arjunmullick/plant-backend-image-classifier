@@ -17,10 +17,18 @@ from app.models.schemas import (
     ClassificationRequest,
     ClassificationResponse,
     ErrorResponse,
+    ComparisonRequest,
+    ComparisonResponse,
+    ExternalModelPrediction,
+    AvailableModelsResponse,
 )
 from app.services.classification_service import (
     ClassificationService,
     get_classification_service,
+)
+from app.ml.external_models import (
+    get_external_model_registry,
+    ExternalModelType,
 )
 
 logger = logging.getLogger(__name__)
@@ -374,3 +382,240 @@ async def get_supported_diseases(
         "diseases": service.get_supported_diseases(),
         "total": len(service.get_supported_diseases())
     }
+
+
+# === Model Comparison Endpoints ===
+
+@router.post(
+    "/compare",
+    response_model=ComparisonResponse,
+    summary="Compare predictions across models",
+    description="""
+    Compare predictions from our internal model with open-source models.
+
+    **Available Models:**
+    - `internal`: Our trained model with full pipeline
+    - `mobilenet_v2`: MobileNetV2 Plant Disease (HuggingFace) - 38 classes, ~95% accuracy
+    - `vit_crop`: ViT Crop Diseases (HuggingFace) - 14 classes, ~98% accuracy
+    - `plantnet`: Pl@ntNet API - 50,000+ species (requires API key)
+
+    **Use Cases:**
+    - Validate predictions across multiple models
+    - Understand model agreement/disagreement
+    - Research and comparison purposes
+    """
+)
+async def compare_models(
+    request: ComparisonRequest,
+    service: ClassificationService = Depends(get_classification_service)
+) -> ComparisonResponse:
+    """
+    Compare predictions from multiple models.
+
+    Runs the same image through selected models and returns
+    side-by-side comparison of results.
+    """
+    import base64
+    from io import BytesIO
+    from PIL import Image
+    import time
+
+    try:
+        start_time = time.time()
+
+        # Decode image
+        image_data = request.image
+        if "," in image_data:
+            image_data = image_data.split(",", 1)[1]
+
+        image_bytes = base64.b64decode(image_data)
+        pil_image = Image.open(BytesIO(image_bytes)).convert("RGB")
+
+        # Results containers
+        internal_result = None
+        external_results = {}
+
+        # Run internal model if requested
+        if "internal" in request.models:
+            try:
+                internal_response = service.classify(
+                    image_base64=request.image,
+                    region=None,
+                    include_treatment=False,
+                    include_explainability=False
+                )
+                internal_result = {
+                    "species": internal_response.plant.species.name,
+                    "species_confidence": internal_response.plant.species.confidence,
+                    "common_name": internal_response.plant.common_name,
+                    "disease": internal_response.health.disease,
+                    "health_status": internal_response.health.status,
+                    "disease_confidence": internal_response.health.confidence,
+                    "processing_time_ms": internal_response.metadata.get("processing_time_ms", 0)
+                        if internal_response.metadata else 0
+                }
+            except Exception as e:
+                logger.error(f"Internal model error: {e}")
+                internal_result = {"error": str(e)}
+
+        # Map model names to types
+        model_type_map = {
+            "mobilenet_v2": ExternalModelType.MOBILENET_V2,
+            "vit_crop": ExternalModelType.VIT_CROP,
+            "plantnet": ExternalModelType.PLANTNET,
+        }
+
+        # Run external models
+        registry = get_external_model_registry()
+        external_model_types = [
+            model_type_map[m]
+            for m in request.models
+            if m in model_type_map
+        ]
+
+        if external_model_types:
+            comparison_results = await registry.run_comparison(
+                pil_image,
+                model_types=external_model_types
+            )
+
+            for model_key, result in comparison_results.items():
+                external_results[model_key] = ExternalModelPrediction(
+                    model_name=result.model_name,
+                    model_type=result.model_type.value,
+                    prediction=result.prediction,
+                    confidence=result.confidence,
+                    raw_label=result.raw_label,
+                    processing_time_ms=result.processing_time_ms,
+                    error=result.error,
+                    additional_info=result.additional_info
+                )
+
+        # Calculate agreement score
+        agreement_score = _calculate_agreement_score(internal_result, external_results)
+
+        # Generate recommendation
+        recommendation = _generate_recommendation(agreement_score, internal_result, external_results)
+
+        total_time = (time.time() - start_time) * 1000
+
+        return ComparisonResponse(
+            internal=internal_result,
+            external_models=external_results,
+            agreement_score=agreement_score,
+            recommendation=recommendation,
+            metadata={
+                "total_processing_time_ms": total_time,
+                "models_compared": len(request.models),
+                "models_requested": request.models
+            }
+        )
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.exception(f"Model comparison failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get(
+    "/compare/models",
+    response_model=AvailableModelsResponse,
+    summary="List available comparison models",
+    description="Get list of available models for comparison with their status."
+)
+async def get_available_comparison_models(
+    service: ClassificationService = Depends(get_classification_service)
+) -> AvailableModelsResponse:
+    """Get list of available models for comparison."""
+    registry = get_external_model_registry()
+
+    return AvailableModelsResponse(
+        internal_model={
+            "name": "Plant Classifier",
+            "version": "0.1.0",
+            "capabilities": ["species", "disease", "treatment", "explainability"],
+            "is_loaded": True
+        },
+        external_models=registry.get_available_models()
+    )
+
+
+def _calculate_agreement_score(
+    internal_result: Optional[dict],
+    external_results: dict
+) -> Optional[float]:
+    """
+    Calculate agreement score between models.
+
+    Returns a score from 0 to 1 based on how many models agree.
+    """
+    if not internal_result or "error" in internal_result:
+        return None
+
+    internal_disease = internal_result.get("disease", "").lower() if internal_result.get("disease") else "healthy"
+
+    agreements = 0
+    total_comparisons = 0
+
+    for model_key, result in external_results.items():
+        if result.error:
+            continue
+
+        total_comparisons += 1
+        external_prediction = (result.prediction or "").lower()
+
+        # Check for disease agreement (fuzzy matching)
+        if internal_disease == "healthy" and external_prediction == "healthy":
+            agreements += 1
+        elif internal_disease != "healthy" and external_prediction != "healthy":
+            # Both detected disease - check if similar
+            if _diseases_similar(internal_disease, external_prediction):
+                agreements += 1
+            else:
+                agreements += 0.5  # Partial credit for both detecting disease
+
+    if total_comparisons == 0:
+        return None
+
+    return agreements / total_comparisons
+
+
+def _diseases_similar(disease1: str, disease2: str) -> bool:
+    """Check if two disease names are similar."""
+    # Normalize names
+    d1 = disease1.lower().replace("_", " ").replace("-", " ")
+    d2 = disease2.lower().replace("_", " ").replace("-", " ")
+
+    # Direct match
+    if d1 == d2:
+        return True
+
+    # Check for key disease terms
+    disease_terms = [
+        "blight", "rust", "spot", "mold", "rot", "virus", "mites",
+        "scab", "mildew", "wilt", "canker"
+    ]
+
+    for term in disease_terms:
+        if term in d1 and term in d2:
+            return True
+
+    return False
+
+
+def _generate_recommendation(
+    agreement_score: Optional[float],
+    internal_result: Optional[dict],
+    external_results: dict
+) -> str:
+    """Generate recommendation based on comparison results."""
+    if agreement_score is None:
+        return "Unable to calculate agreement - check model results for errors"
+
+    if agreement_score >= 0.8:
+        return "High confidence - models strongly agree on the diagnosis"
+    elif agreement_score >= 0.5:
+        return "Moderate confidence - some agreement between models. Consider expert verification for critical decisions."
+    else:
+        return "Low agreement between models - recommend expert verification before taking action"

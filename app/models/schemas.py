@@ -312,3 +312,120 @@ class ImageQualityWarning(BaseModel):
     quality_score: float = Field(..., ge=0.0, le=1.0)
     issues: list[str] = Field(default_factory=list)
     recommendation: Optional[str] = None
+
+
+# === Model Comparison Schemas ===
+
+class ComparisonRequest(BaseModel):
+    """
+    Request for model comparison.
+
+    Allows comparing our internal model with external open-source models.
+    """
+    image: str = Field(
+        ...,
+        description="Base64-encoded image data",
+        min_length=100
+    )
+    models: list[str] = Field(
+        default=["internal", "mobilenet_v2", "vit_crop"],
+        description="Models to compare: internal, mobilenet_v2, vit_crop, plantnet"
+    )
+    include_confidence: bool = Field(
+        default=True,
+        description="Include confidence scores in comparison"
+    )
+
+    @field_validator("image")
+    @classmethod
+    def validate_base64(cls, v: str) -> str:
+        """Validate that the image is valid base64."""
+        if "," in v:
+            v = v.split(",", 1)[1]
+        try:
+            decoded = base64.b64decode(v)
+            if len(decoded) < 100:
+                raise ValueError("Image data too small")
+            if len(decoded) > 10 * 1024 * 1024:
+                raise ValueError("Image exceeds 10MB limit")
+            return v
+        except Exception as e:
+            raise ValueError(f"Invalid base64 image data: {e}")
+
+
+class ExternalModelPrediction(BaseModel):
+    """Prediction from an external model."""
+    model_name: str = Field(..., description="Human-readable model name")
+    model_type: str = Field(..., description="Model type identifier")
+    prediction: Optional[str] = Field(None, description="Predicted class/disease")
+    confidence: Optional[float] = Field(None, ge=0.0, le=1.0, description="Confidence score")
+    raw_label: Optional[str] = Field(None, description="Raw label from model")
+    processing_time_ms: float = Field(..., description="Processing time in milliseconds")
+    error: Optional[str] = Field(None, description="Error message if prediction failed")
+    additional_info: Optional[dict] = Field(None, description="Additional model-specific info")
+
+
+class ComparisonResponse(BaseModel):
+    """
+    Response for model comparison.
+
+    Contains predictions from multiple models for side-by-side comparison.
+    """
+    internal: Optional[dict] = Field(
+        None,
+        description="Prediction from our internal model"
+    )
+    external_models: dict[str, ExternalModelPrediction] = Field(
+        default_factory=dict,
+        description="Predictions from external models"
+    )
+    agreement_score: Optional[float] = Field(
+        None,
+        ge=0.0,
+        le=1.0,
+        description="Agreement score between models (0-1)"
+    )
+    recommendation: Optional[str] = Field(
+        None,
+        description="Recommendation based on model agreement"
+    )
+    metadata: Optional[dict] = Field(
+        None,
+        description="Comparison metadata"
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "internal": {
+                    "disease": "Early Blight",
+                    "confidence": 0.92,
+                    "species": "Solanum lycopersicum"
+                },
+                "external_models": {
+                    "mobilenet_v2": {
+                        "model_name": "MobileNetV2 Plant Disease (HF)",
+                        "model_type": "mobilenet_v2",
+                        "prediction": "Early Blight",
+                        "confidence": 0.89,
+                        "processing_time_ms": 78
+                    },
+                    "vit_crop": {
+                        "model_name": "ViT Crop Diseases (HF)",
+                        "model_type": "vit_crop",
+                        "prediction": "Not supported",
+                        "confidence": None,
+                        "processing_time_ms": 0,
+                        "error": "Tomato not in supported crops"
+                    }
+                },
+                "agreement_score": 0.85,
+                "recommendation": "High confidence - models agree on disease identification"
+            }
+        }
+
+
+class AvailableModelsResponse(BaseModel):
+    """Response listing available models for comparison."""
+    internal_model: dict = Field(..., description="Internal model info")
+    external_models: list[dict] = Field(..., description="Available external models")

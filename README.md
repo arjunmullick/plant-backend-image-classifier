@@ -12,8 +12,9 @@ A production-grade backend service for plant species identification, disease det
 ## Quick Links
 
 - **Run the API**: `uvicorn app.main:app --reload`
-- **Train a model**: See [TRAINING_GUIDE.md](TRAINING_GUIDE.md)
+- **Web UI**: http://localhost:8000 (after starting server)
 - **API Docs**: http://localhost:8000/docs (after starting server)
+- **Train a model**: See [TRAINING_GUIDE.md](TRAINING_GUIDE.md)
 
 ## System Overview
 
@@ -400,10 +401,17 @@ plant-backend-image-classifier/
 │   │   ├── preprocessor.py         # Image preprocessing
 │   │   ├── species_classifier.py   # Species classification
 │   │   ├── disease_detector.py     # Disease detection
-│   │   └── explainability.py       # Grad-CAM and explanations
+│   │   ├── explainability.py       # Grad-CAM and explanations
+│   │   └── external_models.py      # External model integrations
 │   └── services/
 │       ├── classification_service.py  # Pipeline orchestration
 │       └── treatment_service.py       # Treatment recommendations
+├── static/                          # Web frontend
+│   ├── index.html                  # Main web application
+│   ├── css/
+│   │   └── style.css               # Responsive styles
+│   └── js/
+│       └── app.js                  # API integration & UI logic
 ├── tests/
 │   └── test_api.py                 # API tests
 ├── training/                        # Training scripts (Modal Labs)
@@ -415,6 +423,156 @@ plant-backend-image-classifier/
 ├── requirements.txt
 ├── README.md
 └── TRAINING_GUIDE.md               # GPU-free training documentation
+```
+
+---
+
+## Web Frontend
+
+The application includes a modern web interface for testing and demonstrating all classification features.
+
+### Running the Frontend
+
+```bash
+# Start the server
+uvicorn app.main:app --reload --port 8000
+
+# Open browser to:
+http://localhost:8000
+```
+
+### Frontend Features
+
+- **Mode Selection**: Switch between Full Analysis, Species Only, Disease Only, and Batch modes
+- **Drag & Drop Upload**: Easy image upload with preview
+- **Options Panel**: Configure treatment recommendations, explainability, region filters
+- **Result Cards**: Visual display of plant identification, health assessment, treatments
+- **Model Comparison**: Side-by-side comparison with open-source models
+- **API Status Panel**: Monitor endpoint availability and loaded models
+- **Error Handling**: Toast notifications and detailed error messages
+
+### Screenshot
+
+The UI includes:
+- Header with API status indicator
+- Tab-based mode selection
+- Upload area with drag-and-drop support
+- Configurable options panel
+- Rich result cards with expandable sections
+- Collapsible API status panel
+
+---
+
+## Model Comparison Feature
+
+Compare our model predictions with popular open-source models side-by-side.
+
+### Supported External Models
+
+| Model | Type | Classes | Accuracy | Source |
+|-------|------|---------|----------|--------|
+| MobileNetV2 Plant Disease | CNN | 38 | 95.41% | [HuggingFace](https://huggingface.co/linkanjarad/mobilenet_v2_1.0_224-plant-disease-identification) |
+| ViT Crop Diseases | Transformer | 14 | 98% | [HuggingFace](https://huggingface.co/wambugu71/crop_leaf_diseases_vit) |
+| Pl@ntNet API | API | 50,000+ | N/A | [PlantNet](https://my.plantnet.org/) |
+
+### Comparison Endpoint
+
+```http
+POST /api/v1/classify/compare
+Content-Type: application/json
+
+{
+  "image": "<base64_encoded_image>",
+  "models": ["internal", "mobilenet_v2", "vit_crop", "plantnet"],
+  "include_confidence": true
+}
+```
+
+### Comparison Response
+
+```json
+{
+  "comparison": {
+    "internal": {
+      "model_name": "Plant Classifier v0.1.0",
+      "disease": "Early Blight",
+      "confidence": 0.92,
+      "processing_time_ms": 145
+    },
+    "mobilenet_v2": {
+      "model_name": "MobileNetV2 Plant Disease",
+      "disease": "Tomato___Early_blight",
+      "confidence": 0.89,
+      "processing_time_ms": 78
+    },
+    "vit_crop": {
+      "model_name": "ViT Crop Diseases",
+      "disease": "Not supported (tomato)",
+      "confidence": null,
+      "processing_time_ms": 0
+    },
+    "plantnet": {
+      "model_name": "Pl@ntNet",
+      "species": "Solanum lycopersicum",
+      "confidence": 0.94,
+      "processing_time_ms": 523
+    }
+  },
+  "agreement_score": 0.67,
+  "recommendation": "High confidence - models agree on disease identification"
+}
+```
+
+### Enabling External Models
+
+```bash
+# Set environment variables for API keys
+export PLANTNET_API_KEY=your_plantnet_api_key
+
+# Enable model comparison in config
+export PLANT_CLASSIFIER_ENABLE_COMPARISON=true
+```
+
+### Model Integration Details
+
+#### 1. MobileNetV2 Plant Disease (HuggingFace)
+```python
+from transformers import pipeline
+
+classifier = pipeline(
+    "image-classification",
+    model="linkanjarad/mobilenet_v2_1.0_224-plant-disease-identification"
+)
+results = classifier("plant_image.jpg")
+```
+
+#### 2. ViT Crop Diseases (HuggingFace)
+```python
+from transformers import ViTFeatureExtractor, ViTForImageClassification
+from PIL import Image
+
+feature_extractor = ViTFeatureExtractor.from_pretrained('wambugu71/crop_leaf_diseases_vit')
+model = ViTForImageClassification.from_pretrained('wambugu71/crop_leaf_diseases_vit')
+
+image = Image.open('plant_image.jpg')
+inputs = feature_extractor(images=image, return_tensors="pt")
+outputs = model(**inputs)
+predicted_class = model.config.id2label[outputs.logits.argmax(-1).item()]
+```
+
+#### 3. Pl@ntNet API
+```python
+import requests
+
+response = requests.get(
+    "https://my-api.plantnet.org/v2/identify/all",
+    params={
+        "images": ["https://example.com/plant.jpg"],
+        "organs": ["leaf"],
+        "api-key": PLANTNET_API_KEY
+    }
+)
+results = response.json()
 ```
 
 ---
