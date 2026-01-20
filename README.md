@@ -11,10 +11,13 @@ A production-grade backend service for plant species identification, disease det
 
 ## Quick Links
 
-- **Run the API**: `uvicorn app.main:app --reload`
-- **Web UI**: http://localhost:8000 (after starting server)
-- **API Docs**: http://localhost:8000/docs (after starting server)
+- **Install**: `pip install -r requirements.txt` (includes torch, transformers)
+- **Run the API**: `uvicorn app.main:app --reload --port 8000`
+- **Web UI**: http://localhost:8000 (interactive classification interface)
+- **API Docs**: http://localhost:8000/docs (Swagger documentation)
+- **Compare Models**: http://localhost:8000 → "Compare Models" tab
 - **Train a model**: See [TRAINING_GUIDE.md](TRAINING_GUIDE.md)
+- **Run tests**: `pytest tests/ -v`
 
 ## System Overview
 
@@ -76,12 +79,40 @@ A production-grade backend service for plant species identification, disease det
 
 ## ML Architecture
 
+### Real Model Implementation
+
+The application uses **real HuggingFace models** for inference (not placeholders):
+
+| Component | Model | Source | Classes |
+|-----------|-------|--------|---------|
+| **Internal Species/Disease** | MobileNetV2 | `linkanjarad/mobilenet_v2_1.0_224-plant-disease-identification` | 38 PlantVillage classes |
+| **External MobileNetV2** | MobileNetV2 | Same as above | 38 classes |
+| **External ViT** | Vision Transformer | `wambugu71/crop_leaf_diseases_vit` | 14 classes (Corn, Potato, Rice, Wheat) |
+| **External PlantNet** | API | PlantNet REST API | 50,000+ species |
+
+### Model Version Tracking
+
+- **Real models**: Version `1.0.0-mobilenet_v2`
+- **Fallback (if transformers not installed)**: Version `0.1.0-placeholder`
+
+Check model version in API responses:
+```json
+{
+  "metadata": {
+    "model_versions": {
+      "species_classifier": "1.0.0-mobilenet_v2",
+      "disease_detector": "1.0.0-mobilenet_v2"
+    }
+  }
+}
+```
+
 ### Model Selection Rationale
 
 | Component | Model | Rationale |
 |-----------|-------|-----------|
-| Species Classification | EfficientNetV2-S | Best accuracy/speed tradeoff, compound scaling |
-| Disease Detection | EfficientNet + Crop-specific heads | Enables specialized models per crop |
+| Species Classification | MobileNetV2 | Fast inference, 38 classes, ~95% accuracy |
+| Disease Detection | MobileNetV2 | Combined species+disease labels, crop-specific routing |
 | Severity Estimation | (Optional) U-Net/DeepLabV3 | Segmentation for affected area |
 
 ### Transfer Learning Strategy
@@ -210,11 +241,13 @@ Content-Type: application/json
 | `/api/v1/classify/species` | POST | Species identification only |
 | `/api/v1/classify/disease` | POST | Disease detection only |
 | `/api/v1/classify/batch` | POST | Batch classification (up to 10) |
+| `/api/v1/classify/compare` | POST | **Compare across multiple models** |
+| `/api/v1/classify/compare/models` | GET | List available comparison models |
 | `/api/v1/classify/feedback` | POST | Submit prediction feedback |
 | `/api/v1/classify/supported-crops` | GET | List supported crops |
 | `/api/v1/classify/supported-diseases` | GET | List supported diseases |
 | `/api/v1/health` | GET | Basic health check |
-| `/api/v1/health/ready` | GET | Detailed readiness check |
+| `/api/v1/health/ready` | GET | Detailed readiness check with model versions |
 
 ## Quick Start
 
@@ -230,25 +263,50 @@ python -m venv venv
 source venv/bin/activate  # Linux/Mac
 # or: venv\Scripts\activate  # Windows
 
-# Install dependencies
+# Install dependencies (includes torch and transformers for real ML inference)
 pip install -r requirements.txt
 ```
+
+### Dependencies
+
+The project requires PyTorch and HuggingFace Transformers for real ML inference:
+
+| Package | Version | Purpose |
+|---------|---------|---------|
+| `torch` | >=2.1.0 | PyTorch deep learning framework |
+| `torchvision` | >=0.16.0 | Image processing utilities |
+| `transformers` | >=4.36.0 | HuggingFace model hub access |
+
+**Note**: On first run, the models will be automatically downloaded from HuggingFace Hub (~100-200MB per model).
 
 ### Running the Server
 
 ```bash
-# Development
+# Development (with auto-reload)
 uvicorn app.main:app --reload --port 8000
 
 # Production
 gunicorn app.main:app -k uvicorn.workers.UvicornWorker -w 4 -b 0.0.0.0:8000
 ```
 
+### Accessing the Application
+
+After starting the server:
+
+| URL | Description |
+|-----|-------------|
+| http://localhost:8000 | **Web UI** - Interactive plant classification interface |
+| http://localhost:8000/docs | **API Docs** - Swagger/OpenAPI documentation |
+| http://localhost:8000/redoc | **ReDoc** - Alternative API documentation |
+
 ### Testing
 
 ```bash
-# Run tests
+# Run all tests
 pytest tests/ -v
+
+# Run real inference tests (requires torch/transformers)
+pytest tests/test_real_inference.py -v
 
 # With coverage
 pytest tests/ --cov=app --cov-report=html
@@ -443,37 +501,91 @@ http://localhost:8000
 
 ### Frontend Features
 
-- **Mode Selection**: Switch between Full Analysis, Species Only, Disease Only, and Batch modes
-- **Drag & Drop Upload**: Easy image upload with preview
-- **Options Panel**: Configure treatment recommendations, explainability, region filters
-- **Result Cards**: Visual display of plant identification, health assessment, treatments
-- **Model Comparison**: Side-by-side comparison with open-source models
-- **API Status Panel**: Monitor endpoint availability and loaded models
-- **Error Handling**: Toast notifications and detailed error messages
+| Mode | Description |
+|------|-------------|
+| **Full Analysis** | Complete pipeline: species identification + disease detection + treatment recommendations |
+| **Species Only** | Fast species identification with taxonomy (Family → Genus → Species) |
+| **Disease Only** | Disease detection with optional crop hint for better accuracy |
+| **Batch (10 max)** | Process multiple images at once with summary statistics |
+| **Compare Models** | Side-by-side comparison across multiple ML models |
 
-### Screenshot
+### Compare Models Mode
 
-The UI includes:
-- Header with API status indicator
-- Tab-based mode selection
-- Upload area with drag-and-drop support
-- Configurable options panel
-- Rich result cards with expandable sections
-- Collapsible API status panel
+The Compare Models feature allows you to validate predictions across multiple models:
+
+**Features:**
+- **Model Selection Checkboxes** - Choose which models to include
+- **Agreement Score** - Visual indicator showing model consensus (High/Medium/Low)
+- **Side-by-Side Cards** - Each model's prediction with:
+  - Predicted disease/health status
+  - Confidence score with visual bar
+  - Top-3 alternative predictions
+  - Processing time
+  - Raw label from model
+- **Recommendation Banner** - Guidance based on agreement level
+
+**How to Use:**
+1. Click the **"Compare Models"** tab
+2. Select models using checkboxes (Internal Model selected by default)
+3. Upload a plant image
+4. Click **"Analyze Plant"**
+5. Review side-by-side results
+
+### UI Components
+
+- **Header**: API status indicator (green = online, red = offline)
+- **Tabs**: Mode selection with icons
+- **Upload Area**: Drag-and-drop with preview
+- **Options Panel**: Treatment, explainability, region settings
+- **Model Selection Panel** (Compare mode): Checkboxes with model descriptions
+- **Result Cards**: Taxonomy tree, health status, treatment tabs
+- **Comparison Grid** (Compare mode): Model cards with predictions
+- **API Panel**: Collapsible endpoint list and loaded models info
+- **Toast Notifications**: Success/error feedback
 
 ---
 
 ## Model Comparison Feature
 
-Compare our model predictions with popular open-source models side-by-side.
+Compare predictions across multiple ML models side-by-side. All models now use **real HuggingFace inference**.
 
-### Supported External Models
+### Available Models for Comparison
 
-| Model | Type | Classes | Accuracy | Source |
-|-------|------|---------|----------|--------|
-| MobileNetV2 Plant Disease | CNN | 38 | 95.41% | [HuggingFace](https://huggingface.co/linkanjarad/mobilenet_v2_1.0_224-plant-disease-identification) |
-| ViT Crop Diseases | Transformer | 14 | 98% | [HuggingFace](https://huggingface.co/wambugu71/crop_leaf_diseases_vit) |
-| Pl@ntNet API | API | 50,000+ | N/A | [PlantNet](https://my.plantnet.org/) |
+| Model | Type | Classes | Accuracy | Description |
+|-------|------|---------|----------|-------------|
+| **Internal Model** | MobileNetV2 | 38 | ~95% | Our integrated classifier (species + disease) |
+| **MobileNetV2 (HF)** | CNN | 38 | 95.41% | [HuggingFace](https://huggingface.co/linkanjarad/mobilenet_v2_1.0_224-plant-disease-identification) |
+| **ViT Crop Diseases** | Transformer | 14 | 98% | [HuggingFace](https://huggingface.co/wambugu71/crop_leaf_diseases_vit) - Corn, Potato, Rice, Wheat |
+| **Pl@ntNet API** | External API | 50,000+ | N/A | [PlantNet](https://my.plantnet.org/) - Requires API key |
+
+### Using the Comparison UI
+
+1. **Start the server**:
+   ```bash
+   uvicorn app.main:app --reload --port 8000
+   ```
+
+2. **Open the Web UI**: http://localhost:8000
+
+3. **Select "Compare Models" tab**
+
+4. **Choose models to compare**:
+   - Check/uncheck the model checkboxes
+   - Internal Model (recommended - always include)
+   - MobileNetV2 (HuggingFace)
+   - ViT Crop Diseases (best for Corn, Potato, Rice, Wheat)
+   - PlantNet (requires API key)
+
+5. **Upload an image** (drag & drop or click)
+
+6. **Click "Analyze Plant"**
+
+7. **View results**:
+   - Side-by-side model predictions
+   - Confidence scores with visual bars
+   - Top-3 alternative predictions per model
+   - Agreement score (High/Medium/Low)
+   - Processing time per model
 
 ### Comparison Endpoint
 
@@ -526,12 +638,46 @@ Content-Type: application/json
 ### Enabling External Models
 
 ```bash
-# Set environment variables for API keys
+# Set environment variables for API keys (optional - for PlantNet)
 export PLANTNET_API_KEY=your_plantnet_api_key
-
-# Enable model comparison in config
-export PLANT_CLASSIFIER_ENABLE_COMPARISON=true
 ```
+
+### Verifying Real Models are Working
+
+**Check model versions in API response:**
+```bash
+curl http://localhost:8000/api/v1/health/ready | jq
+```
+
+Expected output with real models:
+```json
+{
+  "status": "healthy",
+  "components": {
+    "species_classifier": {
+      "version": "1.0.0-mobilenet_v2"  // Real model
+    },
+    "disease_detector": {
+      "version": "1.0.0-mobilenet_v2"  // Real model
+    }
+  }
+}
+```
+
+If you see `0.1.0-placeholder`, install torch and transformers:
+```bash
+pip install torch transformers
+```
+
+**Run determinism tests:**
+```bash
+pytest tests/test_real_inference.py -v
+```
+
+This verifies:
+- Same image produces identical predictions every time
+- Model version indicates real inference
+- Confidence scores are in valid range
 
 ### Model Integration Details
 
@@ -626,6 +772,86 @@ Environment variables (prefix: `PLANT_CLASSIFIER_`):
 | `DISEASE_MODEL_PATH` | `None` | Disease model checkpoint |
 | `ENABLE_GRAD_CAM` | `true` | Enable Grad-CAM visualizations |
 | `ENABLE_REGION_FILTERING` | `false` | Filter treatments by region |
+| `PLANTNET_API_KEY` | `None` | PlantNet API key for external model |
+
+---
+
+## Troubleshooting
+
+### Models showing "placeholder" version
+
+**Problem**: API returns `model_version: "0.1.0-placeholder"`
+
+**Solution**: Install PyTorch and Transformers:
+```bash
+pip install torch transformers
+```
+
+Then restart the server. First run will download models from HuggingFace (~100-200MB).
+
+### Slow first request
+
+**Cause**: Models are lazily loaded on first inference.
+
+**Solution**: This is expected. Subsequent requests will be fast (~100-500ms).
+
+### "transformers not installed" warning
+
+**Cause**: The `transformers` package is not installed.
+
+**Solution**:
+```bash
+pip install transformers>=4.36.0
+```
+
+### Compare Models not showing results
+
+**Check**:
+1. At least one model is selected
+2. Image is uploaded
+3. Server logs for errors (`uvicorn app.main:app --reload`)
+
+### PlantNet returns error
+
+**Cause**: Missing or invalid API key.
+
+**Solution**:
+```bash
+export PLANTNET_API_KEY=your_api_key_here
+```
+
+Get a free API key at https://my.plantnet.org/
+
+---
+
+## Complete Setup Commands
+
+```bash
+# 1. Clone and setup
+git clone <repository-url>
+cd plant-backend-image-classifier
+python -m venv venv
+source venv/bin/activate  # or venv\Scripts\activate on Windows
+
+# 2. Install all dependencies (including ML libraries)
+pip install -r requirements.txt
+
+# 3. Start the server
+uvicorn app.main:app --reload --port 8000
+
+# 4. Open in browser
+# Web UI: http://localhost:8000
+# API Docs: http://localhost:8000/docs
+
+# 5. Test the API
+curl -X POST http://localhost:8000/api/v1/classify/compare \
+  -H "Content-Type: application/json" \
+  -d '{"image": "<base64_image>", "models": ["internal", "mobilenet_v2"]}'
+
+# 6. Run tests
+pytest tests/ -v
+pytest tests/test_real_inference.py -v  # Real model tests
+```
 
 ## License
 

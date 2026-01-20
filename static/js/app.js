@@ -114,6 +114,7 @@ function initTabs() {
 }
 
 function setMode(mode) {
+    console.log('setMode called with:', mode);
     state.mode = mode;
 
     // Update tab styles
@@ -122,11 +123,16 @@ function setMode(mode) {
     });
 
     // Show/hide crop option for disease mode
-    elements.cropOption.style.display = mode === 'disease' ? 'flex' : 'none';
+    if (elements.cropOption) {
+        elements.cropOption.style.display = mode === 'disease' ? 'flex' : 'none';
+    }
 
     // Show/hide model selection for compare mode
     if (elements.modelSelectionPanel) {
         elements.modelSelectionPanel.style.display = mode === 'compare' ? 'block' : 'none';
+        console.log('modelSelectionPanel display:', elements.modelSelectionPanel.style.display);
+    } else {
+        console.warn('modelSelectionPanel element not found!');
     }
 
     // Update file input for batch mode
@@ -139,7 +145,9 @@ function setMode(mode) {
     clearSelection();
 
     // Hide results
-    elements.resultsSection.style.display = 'none';
+    if (elements.resultsSection) {
+        elements.resultsSection.style.display = 'none';
+    }
 }
 
 // ============================================
@@ -311,6 +319,7 @@ async function handleAnalyze() {
             result = await classifyBatch(state.selectedFiles, options);
             displayBatchResults(result);
         } else if (state.mode === 'compare') {
+            console.log('Compare mode - starting comparison');
             const file = state.selectedFiles[0];
             const selectedModels = getSelectedModels();
 
@@ -318,7 +327,9 @@ async function handleAnalyze() {
                 throw new Error('Please select at least one model to compare');
             }
 
+            console.log('Calling classifyCompare with models:', selectedModels);
             result = await classifyCompare(file, selectedModels);
+            console.log('Compare API result:', result);
             displayComparisonResults(result);
         } else {
             const file = state.selectedFiles[0];
@@ -456,6 +467,7 @@ function getSelectedModels() {
     if (elements.modelMobileNet?.checked) models.push('mobilenet_v2');
     if (elements.modelViT?.checked) models.push('vit_crop');
     if (elements.modelPlantNet?.checked) models.push('plantnet');
+    console.log('getSelectedModels:', models);
     return models;
 }
 
@@ -480,11 +492,22 @@ async function classifyCompare(file, models) {
 }
 
 function displayComparisonResults(data) {
+    console.log('displayComparisonResults called with:', data);
+
+    // Verify elements exist
+    if (!elements.comparisonResults) {
+        console.error('comparisonResults element not found!');
+        return;
+    }
+
     // Hide other result containers
-    elements.singleResult.style.display = 'none';
-    elements.batchResults.style.display = 'none';
-    elements.errorContainer.style.display = 'none';
+    if (elements.singleResult) elements.singleResult.style.display = 'none';
+    if (elements.batchResults) elements.batchResults.style.display = 'none';
+    if (elements.errorContainer) elements.errorContainer.style.display = 'none';
+
+    // Show comparison results
     elements.comparisonResults.style.display = 'block';
+    console.log('comparisonResults display set to block');
 
     // Agreement Score
     const scoreContainer = elements.agreementScore;
