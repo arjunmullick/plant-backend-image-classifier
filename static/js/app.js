@@ -24,6 +24,7 @@ const state = {
     isLoading: false,
     currentTreatmentTab: 'organic',
     treatmentData: null,
+    selectedModels: ['internal', 'mobilenet_v2'],  // Default selected models for comparison
 };
 
 // ============================================
@@ -68,6 +69,20 @@ const elements = {
     apiStatus: document.getElementById('apiStatus'),
     apiModels: document.getElementById('apiModels'),
 
+    // Model Selection (Compare Mode)
+    modelSelectionPanel: document.getElementById('modelSelectionPanel'),
+    modelInternal: document.getElementById('modelInternal'),
+    modelMobileNet: document.getElementById('modelMobileNet'),
+    modelViT: document.getElementById('modelViT'),
+    modelPlantNet: document.getElementById('modelPlantNet'),
+
+    // Comparison Results
+    comparisonResults: document.getElementById('comparisonResults'),
+    agreementScore: document.getElementById('agreementScore'),
+    comparisonRecommendation: document.getElementById('comparisonRecommendation'),
+    comparisonGrid: document.getElementById('comparisonGrid'),
+    comparisonMeta: document.getElementById('comparisonMeta'),
+
     // Toast
     toastContainer: document.getElementById('toastContainer'),
 };
@@ -108,6 +123,11 @@ function setMode(mode) {
 
     // Show/hide crop option for disease mode
     elements.cropOption.style.display = mode === 'disease' ? 'flex' : 'none';
+
+    // Show/hide model selection for compare mode
+    if (elements.modelSelectionPanel) {
+        elements.modelSelectionPanel.style.display = mode === 'compare' ? 'block' : 'none';
+    }
 
     // Update file input for batch mode
     if (mode === 'batch') {
@@ -290,6 +310,16 @@ async function handleAnalyze() {
         if (state.mode === 'batch') {
             result = await classifyBatch(state.selectedFiles, options);
             displayBatchResults(result);
+        } else if (state.mode === 'compare') {
+            const file = state.selectedFiles[0];
+            const selectedModels = getSelectedModels();
+
+            if (selectedModels.length === 0) {
+                throw new Error('Please select at least one model to compare');
+            }
+
+            result = await classifyCompare(file, selectedModels);
+            displayComparisonResults(result);
         } else {
             const file = state.selectedFiles[0];
 
@@ -415,6 +445,225 @@ async function classifyBatch(files, options) {
     }
 
     return response.json();
+}
+
+// ============================================
+// Model Comparison Functions
+// ============================================
+function getSelectedModels() {
+    const models = [];
+    if (elements.modelInternal?.checked) models.push('internal');
+    if (elements.modelMobileNet?.checked) models.push('mobilenet_v2');
+    if (elements.modelViT?.checked) models.push('vit_crop');
+    if (elements.modelPlantNet?.checked) models.push('plantnet');
+    return models;
+}
+
+async function classifyCompare(file, models) {
+    const base64 = await fileToBase64(file);
+
+    const response = await fetch(`${API_BASE}/classify/compare`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            image: base64,
+            models: models,
+        }),
+    });
+
+    if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.detail || error.message || `Server error: ${response.status}`);
+    }
+
+    return response.json();
+}
+
+function displayComparisonResults(data) {
+    // Hide other result containers
+    elements.singleResult.style.display = 'none';
+    elements.batchResults.style.display = 'none';
+    elements.errorContainer.style.display = 'none';
+    elements.comparisonResults.style.display = 'block';
+
+    // Agreement Score
+    const scoreContainer = elements.agreementScore;
+    if (data.agreement_score !== null && data.agreement_score !== undefined) {
+        const scorePercent = (data.agreement_score * 100).toFixed(0);
+        const scoreClass = data.agreement_score >= 0.8 ? 'high' :
+                          data.agreement_score >= 0.5 ? 'medium' : 'low';
+        scoreContainer.innerHTML = `
+            <div class="score-circle ${scoreClass}">
+                <span class="score-value">${scorePercent}%</span>
+                <span class="score-label">Agreement</span>
+            </div>
+        `;
+    } else {
+        scoreContainer.innerHTML = `
+            <div class="score-circle unknown">
+                <span class="score-value">N/A</span>
+                <span class="score-label">Agreement</span>
+            </div>
+        `;
+    }
+
+    // Recommendation
+    elements.comparisonRecommendation.innerHTML = `
+        <div class="recommendation-text">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="12" y1="16" x2="12" y2="12"/>
+                <line x1="12" y1="8" x2="12.01" y2="8"/>
+            </svg>
+            ${data.recommendation || 'No recommendation available'}
+        </div>
+    `;
+
+    // Build comparison grid
+    const grid = elements.comparisonGrid;
+    grid.innerHTML = '';
+
+    // Internal model card
+    if (data.internal) {
+        grid.innerHTML += createModelCard('Internal Model', data.internal, true);
+    }
+
+    // External model cards
+    if (data.external_models) {
+        for (const [modelKey, result] of Object.entries(data.external_models)) {
+            grid.innerHTML += createModelCard(result.model_name || modelKey, result, false);
+        }
+    }
+
+    // Meta info
+    if (data.metadata) {
+        elements.comparisonMeta.innerHTML = `
+            <div class="comparison-meta-info">
+                <span>Total processing time: ${data.metadata.total_processing_time_ms?.toFixed(0) || '?'}ms</span>
+                <span>Models compared: ${data.metadata.models_compared || '?'}</span>
+            </div>
+        `;
+    }
+}
+
+function createModelCard(modelName, result, isInternal) {
+    const hasError = result.error;
+    const isHealthy = isInternal
+        ? result.health_status === 'Healthy'
+        : (result.prediction || '').toLowerCase() === 'healthy';
+
+    // Extract prediction info based on model type
+    let prediction, confidence, additionalInfo;
+
+    if (isInternal) {
+        prediction = result.disease || result.health_status || 'Unknown';
+        confidence = result.disease_confidence || result.species_confidence || 0;
+        additionalInfo = `
+            <div class="model-detail">
+                <span class="detail-label">Species:</span>
+                <span class="detail-value">${result.species || 'Unknown'}</span>
+            </div>
+            <div class="model-detail">
+                <span class="detail-label">Common Name:</span>
+                <span class="detail-value">${result.common_name || 'N/A'}</span>
+            </div>
+            <div class="model-detail">
+                <span class="detail-label">Health Status:</span>
+                <span class="detail-value ${isHealthy ? 'healthy' : 'diseased'}">${result.health_status}</span>
+            </div>
+            ${result.disease ? `
+                <div class="model-detail">
+                    <span class="detail-label">Disease:</span>
+                    <span class="detail-value diseased">${result.disease}</span>
+                </div>
+            ` : ''}
+        `;
+    } else {
+        prediction = result.prediction || 'Unknown';
+        confidence = result.confidence || 0;
+        const crop = result.additional_info?.crop || 'N/A';
+        const top3 = result.additional_info?.top_3 || [];
+
+        additionalInfo = `
+            <div class="model-detail">
+                <span class="detail-label">Raw Label:</span>
+                <span class="detail-value">${result.raw_label || 'N/A'}</span>
+            </div>
+            <div class="model-detail">
+                <span class="detail-label">Detected Crop:</span>
+                <span class="detail-value">${crop}</span>
+            </div>
+            ${top3.length > 0 ? `
+                <div class="model-alternatives">
+                    <span class="detail-label">Top Predictions:</span>
+                    <ol class="alt-list">
+                        ${top3.map(t => `
+                            <li>
+                                <span class="alt-name">${t.disease || t.label || t.species || 'Unknown'}</span>
+                                <span class="alt-conf">${(t.confidence * 100).toFixed(1)}%</span>
+                            </li>
+                        `).join('')}
+                    </ol>
+                </div>
+            ` : ''}
+        `;
+    }
+
+    if (hasError) {
+        return `
+            <div class="model-card error">
+                <div class="model-card-header">
+                    <h4>${modelName}</h4>
+                    <span class="model-badge ${isInternal ? 'internal' : 'external'}">
+                        ${isInternal ? 'Internal' : 'External'}
+                    </span>
+                </div>
+                <div class="model-card-body">
+                    <div class="model-error">
+                        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/>
+                            <line x1="12" y1="8" x2="12" y2="12"/>
+                            <line x1="12" y1="16" x2="12.01" y2="16"/>
+                        </svg>
+                        <span>${result.error}</span>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    return `
+        <div class="model-card ${isHealthy ? 'healthy' : 'diseased'}">
+            <div class="model-card-header">
+                <h4>${modelName}</h4>
+                <span class="model-badge ${isInternal ? 'internal' : 'external'}">
+                    ${isInternal ? 'Internal' : 'External'}
+                </span>
+            </div>
+            <div class="model-card-body">
+                <div class="model-prediction">
+                    <span class="prediction-label">Prediction:</span>
+                    <span class="prediction-value ${isHealthy ? 'healthy' : 'diseased'}">${prediction}</span>
+                </div>
+                <div class="model-confidence">
+                    <div class="confidence-bar-container">
+                        <div class="confidence-bar-fill" style="width: ${confidence * 100}%"></div>
+                    </div>
+                    <span class="confidence-text">${(confidence * 100).toFixed(1)}% confidence</span>
+                </div>
+                <div class="model-details">
+                    ${additionalInfo}
+                </div>
+                <div class="model-time">
+                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"/>
+                        <polyline points="12 6 12 12 16 14"/>
+                    </svg>
+                    ${result.processing_time_ms?.toFixed(0) || '?'}ms
+                </div>
+            </div>
+        </div>
+    `;
 }
 
 // ============================================

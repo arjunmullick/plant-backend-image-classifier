@@ -29,10 +29,19 @@ from typing import Optional
 from dataclasses import dataclass
 
 import numpy as np
+from PIL import Image
 
 from app.ml.base import BaseMLComponent, PredictionResult, ModelInfo, DiseasePrediction
 
 logger = logging.getLogger(__name__)
+
+# Try to import transformers for real model inference
+try:
+    from transformers import pipeline as hf_pipeline
+    HF_AVAILABLE = True
+except ImportError:
+    HF_AVAILABLE = False
+    logger.warning("transformers not installed. Using placeholder model.")
 
 
 @dataclass
@@ -366,23 +375,40 @@ class DiseaseDetector(BaseMLComponent):
         """
         logger.info("Loading disease detection models")
 
-        # Load general disease detector
-        self.model = PlaceholderDiseaseModel(
-            num_classes=self.disease_db.num_classes
-        )
+        # Use HuggingFace model if transformers is available
+        if HF_AVAILABLE:
+            logger.info("Using HuggingFace MobileNetV2 for real disease detection")
+            self.model = HuggingFaceDiseaseModel(
+                num_classes=self.disease_db.num_classes
+            )
+            model_version = "1.0.0-mobilenet_v2"
 
-        # Load crop-specific models (in production)
-        if self.crop_specific:
-            for crop in ["tomato", "potato", "apple", "corn", "grape"]:
-                self._crop_models[crop] = PlaceholderDiseaseModel(
-                    num_classes=len(self.disease_db.get_diseases_for_crop(crop)),
-                    crop=crop
-                )
+            # Load crop-specific models using same HuggingFace pipeline
+            if self.crop_specific:
+                for crop in ["tomato", "potato", "apple", "corn", "grape"]:
+                    self._crop_models[crop] = HuggingFaceDiseaseModel(
+                        num_classes=len(self.disease_db.get_diseases_for_crop(crop)),
+                        crop=crop
+                    )
+        else:
+            logger.warning("Falling back to placeholder model (transformers not installed)")
+            self.model = PlaceholderDiseaseModel(
+                num_classes=self.disease_db.num_classes
+            )
+            model_version = "0.1.0-placeholder"
+
+            # Load crop-specific placeholder models
+            if self.crop_specific:
+                for crop in ["tomato", "potato", "apple", "corn", "grape"]:
+                    self._crop_models[crop] = PlaceholderDiseaseModel(
+                        num_classes=len(self.disease_db.get_diseases_for_crop(crop)),
+                        crop=crop
+                    )
 
         self._model_info = ModelInfo(
             name="disease_detector",
-            version="0.1.0-placeholder",
-            architecture="efficientnet_v2_s",
+            version=model_version,
+            architecture="mobilenet_v2" if HF_AVAILABLE else "efficientnet_v2_s",
             input_size=(224, 224),
             num_classes=self.disease_db.num_classes,
             class_names=[d.name for d in self.disease_db.DISEASES],
@@ -390,7 +416,7 @@ class DiseaseDetector(BaseMLComponent):
         )
 
         self._is_loaded = True
-        logger.info(f"Disease detector loaded: {self.disease_db.num_classes} classes")
+        logger.info(f"Disease detector loaded: {self.disease_db.num_classes} classes (version: {model_version})")
 
     def predict(
         self,
@@ -523,12 +549,194 @@ class DiseaseDetector(BaseMLComponent):
         logger.info(f"Added new disease: {disease.name} for crop: {disease.crop}")
 
 
+class HuggingFaceDiseaseModel:
+    """
+    Real disease detection using HuggingFace MobileNetV2.
+
+    Model: linkanjarad/mobilenet_v2_1.0_224-plant-disease-identification
+    - Labels format: "Crop___Disease" or "Crop___healthy"
+    - We parse the label to determine healthy/diseased and disease type
+    """
+
+    MODEL_ID = "linkanjarad/mobilenet_v2_1.0_224-plant-disease-identification"
+
+    # Mapping from MobileNetV2 disease labels to our DiseaseDatabase indices
+    DISEASE_TO_INDEX = {
+        # Healthy states
+        "healthy": 0,  # Will be mapped based on crop
+
+        # Tomato diseases (indices 3-7 in DiseaseDatabase)
+        "Early_blight": 3,
+        "Late_blight": 4,
+        "Bacterial_spot": 5,
+        "Septoria_leaf_spot": 6,
+        "Tomato_Yellow_Leaf_Curl_Virus": 7,
+        "Leaf_Mold": 3,  # Map to Early Blight (similar symptoms)
+        "Target_Spot": 3,
+        "Tomato_mosaic_virus": 7,  # Map to TYLCV
+        "Spider_mites Two-spotted_spider_mite": 5,  # Map to Bacterial Spot
+
+        # Potato diseases (indices 8-9)
+        # Note: Potato uses same disease names but different indices
+
+        # Apple diseases (indices 10-12)
+        "Apple_scab": 10,
+        "Black_rot": 11,
+        "Cedar_apple_rust": 12,
+
+        # Grape diseases (indices 13-14)
+        "Esca_(Black_Measles)": 14,
+        "Leaf_blight_(Isariopsis_Leaf_Spot)": 13,  # Map to Black Rot
+
+        # Corn diseases (indices 15-17)
+        "Common_rust_": 15,
+        "Northern_Leaf_Blight": 16,
+        "Cercospora_leaf_spot Gray_leaf_spot": 17,
+    }
+
+    # Crop-specific healthy indices
+    CROP_HEALTHY_INDEX = {
+        "Tomato": 0,
+        "Potato": 1,
+        "Apple": 2,
+        "Grape": 2,  # Use apple healthy as proxy
+        "Corn_(maize)": 0,  # Use tomato healthy as proxy
+        "Pepper,_bell": 0,
+        "Strawberry": 2,
+        "Cherry_(including_sour)": 2,
+        "Peach": 2,
+        "Soybean": 0,
+        "Squash": 0,
+        "Blueberry": 2,
+        "Orange": 2,
+        "Raspberry": 2,
+    }
+
+    def __init__(self, num_classes: int, crop: Optional[str] = None):
+        self.num_classes = num_classes
+        self.crop = crop
+        self._pipeline = None
+
+    def _ensure_pipeline(self):
+        """Lazy load the HuggingFace pipeline."""
+        if self._pipeline is None:
+            logger.info(f"Loading HuggingFace disease model: {self.MODEL_ID}")
+            self._pipeline = hf_pipeline(
+                "image-classification",
+                model=self.MODEL_ID,
+                device=-1  # CPU
+            )
+            logger.info("HuggingFace disease model loaded successfully")
+
+    def forward(self, x: np.ndarray) -> dict:
+        """
+        Run real disease detection using HuggingFace pipeline.
+
+        Args:
+            x: Image tensor of shape (B, C, H, W) normalized
+
+        Returns:
+            dict with binary_probs, disease_probs, affected_area, features
+        """
+        self._ensure_pipeline()
+
+        batch_size = x.shape[0]
+        binary_probs = np.zeros((batch_size, 2))
+        disease_probs = np.zeros((batch_size, self.num_classes))
+
+        for i in range(batch_size):
+            # Convert tensor back to PIL Image
+            img_tensor = x[i]  # (C, H, W)
+
+            # Denormalize from ImageNet stats
+            mean = np.array([0.485, 0.456, 0.406])
+            std = np.array([0.229, 0.224, 0.225])
+            img_array = img_tensor.transpose(1, 2, 0)  # (H, W, C)
+            img_array = img_array * std + mean
+            img_array = np.clip(img_array * 255, 0, 255).astype(np.uint8)
+            pil_image = Image.fromarray(img_array)
+
+            # Run HuggingFace inference
+            results = self._pipeline(pil_image, top_k=38)
+
+            # Process results
+            total_healthy_conf = 0.0
+            total_diseased_conf = 0.0
+
+            for result in results:
+                raw_label = result["label"]
+                confidence = result["score"]
+
+                # Parse label: "Crop___Disease" or "Crop___healthy"
+                crop, disease = self._parse_label(raw_label)
+                is_healthy = disease.lower() == "healthy"
+
+                if is_healthy:
+                    total_healthy_conf += confidence
+                    # Map to crop-specific healthy index
+                    healthy_idx = self.CROP_HEALTHY_INDEX.get(crop, 0)
+                    if healthy_idx < self.num_classes:
+                        disease_probs[i, healthy_idx] += confidence
+                else:
+                    total_diseased_conf += confidence
+                    # Map disease to our database index
+                    disease_idx = self._get_disease_index(crop, disease)
+                    if disease_idx < self.num_classes:
+                        disease_probs[i, disease_idx] += confidence
+
+            # Normalize binary probs
+            total = total_healthy_conf + total_diseased_conf
+            if total > 0:
+                binary_probs[i, 0] = total_healthy_conf / total  # Healthy
+                binary_probs[i, 1] = total_diseased_conf / total  # Diseased
+
+            # Normalize disease probs
+            total_disease = disease_probs[i].sum()
+            if total_disease > 0:
+                disease_probs[i] /= total_disease
+
+        # Estimate affected area based on disease confidence (heuristic)
+        affected_area = binary_probs[:, 1] * 40 + 10  # 10-50% range
+
+        return {
+            "binary_probs": binary_probs,
+            "disease_probs": disease_probs,
+            "affected_area": affected_area,
+            "features": np.zeros((batch_size, 1280))
+        }
+
+    def _parse_label(self, raw_label: str) -> tuple[str, str]:
+        """Parse raw label to (crop, disease)."""
+        if "___" in raw_label:
+            parts = raw_label.split("___")
+            return parts[0], parts[1]
+        return "Unknown", raw_label
+
+    def _get_disease_index(self, crop: str, disease: str) -> int:
+        """Map crop and disease to our database index."""
+        # First check direct mapping
+        if disease in self.DISEASE_TO_INDEX:
+            idx = self.DISEASE_TO_INDEX[disease]
+            # Adjust for potato (same disease names, different indices)
+            if crop == "Potato":
+                if disease == "Early_blight":
+                    return 8
+                elif disease == "Late_blight":
+                    return 9
+            # Adjust for grape
+            if crop == "Grape" and disease == "Black_rot":
+                return 13
+            return idx
+
+        # Fallback to first disease index
+        return 3
+
+
 class PlaceholderDiseaseModel:
     """
-    Placeholder model for disease detection.
+    Fallback placeholder model when transformers is not available.
 
-    Generates realistic predictions for testing.
-    Replace with PyTorch model in production.
+    Returns random predictions for testing the pipeline structure.
     """
 
     def __init__(self, num_classes: int, crop: Optional[str] = None):
@@ -536,44 +744,29 @@ class PlaceholderDiseaseModel:
         self.crop = crop
 
     def forward(self, x: np.ndarray) -> dict:
-        """
-        Generate placeholder predictions.
-
-        Production implementation would be:
-        ```python
-        with torch.no_grad():
-            features = self.backbone(x)
-
-            binary_logits = self.binary_head(features)
-            disease_logits = self.disease_head(features)
-
-            return {
-                "binary_probs": F.softmax(binary_logits, dim=1),
-                "disease_probs": F.softmax(disease_logits, dim=1),
-                "features": features
-            }
-        ```
-        """
+        """Generate random placeholder predictions with determinism."""
         batch_size = x.shape[0]
 
+        # Use image mean as seed for reproducibility
+        seed = int(np.abs(x.mean()) * 1000000) % (2**31)
+        rng = np.random.RandomState(seed)
+
         # Binary prediction (healthy/diseased)
-        binary_logits = np.random.randn(batch_size, 2)
-        # Slightly bias toward diseased for interesting demo
-        binary_logits[:, 1] += 0.5
+        binary_logits = rng.randn(batch_size, 2)
+        binary_logits[:, 1] += 0.5  # Slight bias toward diseased
         binary_probs = self._softmax(binary_logits)
 
         # Disease classification
-        disease_logits = np.random.randn(batch_size, self.num_classes)
-        # Make one disease more prominent
-        dominant_disease = np.random.randint(3, self.num_classes)  # Skip healthy classes
+        disease_logits = rng.randn(batch_size, self.num_classes)
+        dominant_disease = rng.randint(3, self.num_classes)  # Skip healthy
         disease_logits[:, dominant_disease] += 2.5
         disease_probs = self._softmax(disease_logits)
 
         return {
             "binary_probs": binary_probs,
             "disease_probs": disease_probs,
-            "affected_area": np.random.uniform(10, 50, size=(batch_size,)),
-            "features": np.random.randn(batch_size, 1280)
+            "affected_area": rng.uniform(10, 50, size=(batch_size,)),
+            "features": np.zeros((batch_size, 1280))
         }
 
     def _softmax(self, x: np.ndarray) -> np.ndarray:

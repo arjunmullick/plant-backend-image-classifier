@@ -37,10 +37,19 @@ from typing import Optional
 from dataclasses import dataclass
 
 import numpy as np
+from PIL import Image
 
 from app.ml.base import BaseMLComponent, PredictionResult, ModelInfo, HierarchicalPrediction
 
 logger = logging.getLogger(__name__)
+
+# Try to import transformers for real model inference
+try:
+    from transformers import pipeline as hf_pipeline
+    HF_AVAILABLE = True
+except ImportError:
+    HF_AVAILABLE = False
+    logger.warning("transformers not installed. Using placeholder model.")
 
 
 @dataclass
@@ -243,15 +252,25 @@ class SpeciesClassifier(BaseMLComponent):
         """
         logger.info(f"Loading species classifier: {self.architecture}")
 
-        # Placeholder: In production, load actual PyTorch model
-        self.model = PlaceholderSpeciesModel(
-            num_classes=self.taxonomy_db.num_classes,
-            architecture=self.architecture
-        )
+        # Use HuggingFace model if transformers is available
+        if HF_AVAILABLE:
+            logger.info("Using HuggingFace MobileNetV2 for real inference")
+            self.model = HuggingFaceSpeciesModel(
+                num_classes=self.taxonomy_db.num_classes,
+                architecture=self.architecture
+            )
+            model_version = "1.0.0-mobilenet_v2"
+        else:
+            logger.warning("Falling back to placeholder model (transformers not installed)")
+            self.model = PlaceholderSpeciesModel(
+                num_classes=self.taxonomy_db.num_classes,
+                architecture=self.architecture
+            )
+            model_version = "0.1.0-placeholder"
 
         self._model_info = ModelInfo(
             name="species_classifier",
-            version="0.1.0-placeholder",
+            version=model_version,
             architecture=self.architecture,
             input_size=(224, 224),
             num_classes=self.taxonomy_db.num_classes,
@@ -260,7 +279,7 @@ class SpeciesClassifier(BaseMLComponent):
         )
 
         self._is_loaded = True
-        logger.info(f"Species classifier loaded: {self.taxonomy_db.num_classes} classes")
+        logger.info(f"Species classifier loaded: {self.taxonomy_db.num_classes} classes (version: {model_version})")
 
     def predict(self, input_data: np.ndarray) -> PredictionResult[HierarchicalPrediction]:
         """
@@ -405,57 +424,158 @@ class SpeciesClassifier(BaseMLComponent):
         }
 
 
+class HuggingFaceSpeciesModel:
+    """
+    Real species classification using HuggingFace MobileNetV2.
+
+    Model: linkanjarad/mobilenet_v2_1.0_224-plant-disease-identification
+    - 38 classes from PlantVillage dataset
+    - Labels format: "Crop___Disease" or "Crop___healthy"
+    - We extract the crop name and map to taxonomy
+    """
+
+    MODEL_ID = "linkanjarad/mobilenet_v2_1.0_224-plant-disease-identification"
+
+    # Mapping from MobileNetV2 crop labels to our taxonomy indices
+    CROP_TO_TAXONOMY = {
+        "Tomato": 0,          # Solanum lycopersicum
+        "Potato": 1,          # Solanum tuberosum
+        "Pepper,_bell": 2,    # Capsicum annuum (Bell Pepper)
+        "Apple": 4,           # Malus domestica
+        "Peach": 5,           # Prunus persica
+        "Strawberry": 6,      # Fragaria × ananassa
+        "Raspberry": 7,       # Rubus idaeus
+        "Corn_(maize)": 8,    # Zea mays
+        "Grape": 11,          # Vitis vinifera
+        "Squash": 13,         # Cucurbita pepo
+        "Soybean": 15,        # Glycine max
+        "Orange": 16,         # Citrus sinensis
+        # Default fallback for unrecognized crops
+        "Cherry_(including_sour)": 5,  # Map to Peach (Prunus family)
+        "Blueberry": 6,       # Map to Strawberry (berry)
+    }
+
+    def __init__(self, num_classes: int, architecture: str):
+        self.num_classes = num_classes
+        self.architecture = architecture
+        self._pipeline = None
+        self._last_raw_results = None
+
+    def _ensure_pipeline(self):
+        """Lazy load the HuggingFace pipeline."""
+        if self._pipeline is None:
+            logger.info(f"Loading HuggingFace model: {self.MODEL_ID}")
+            self._pipeline = hf_pipeline(
+                "image-classification",
+                model=self.MODEL_ID,
+                device=-1  # CPU
+            )
+            logger.info("HuggingFace species model loaded successfully")
+
+    def forward(self, x: np.ndarray) -> dict:
+        """
+        Run real inference using HuggingFace pipeline.
+
+        Args:
+            x: Image tensor of shape (B, C, H, W) normalized to [0, 1]
+
+        Returns:
+            dict with species_probs and features
+        """
+        self._ensure_pipeline()
+
+        batch_size = x.shape[0]
+        species_probs = np.zeros((batch_size, self.num_classes))
+
+        for i in range(batch_size):
+            # Convert tensor back to PIL Image for HuggingFace
+            img_tensor = x[i]  # (C, H, W)
+
+            # Denormalize from model preprocessing and convert to PIL
+            # Assuming input is normalized with ImageNet stats
+            mean = np.array([0.485, 0.456, 0.406])
+            std = np.array([0.229, 0.224, 0.225])
+            img_array = img_tensor.transpose(1, 2, 0)  # (H, W, C)
+            img_array = img_array * std + mean
+            img_array = np.clip(img_array * 255, 0, 255).astype(np.uint8)
+            pil_image = Image.fromarray(img_array)
+
+            # Run HuggingFace inference
+            results = self._pipeline(pil_image, top_k=38)
+            self._last_raw_results = results
+
+            # Map HuggingFace results to our taxonomy
+            for result in results:
+                raw_label = result["label"]
+                confidence = result["score"]
+
+                # Extract crop from label (format: "Crop___Disease")
+                crop = self._extract_crop(raw_label)
+                taxonomy_idx = self.CROP_TO_TAXONOMY.get(crop, 0)
+
+                # Accumulate confidence for this crop/species
+                if taxonomy_idx < self.num_classes:
+                    species_probs[i, taxonomy_idx] += confidence
+
+            # Normalize probabilities
+            total = species_probs[i].sum()
+            if total > 0:
+                species_probs[i] /= total
+
+        return {
+            "species_probs": species_probs,
+            "features": np.zeros((batch_size, 1280)),  # Placeholder features
+            "raw_results": self._last_raw_results
+        }
+
+    def _extract_crop(self, raw_label: str) -> str:
+        """Extract crop name from HuggingFace label."""
+        if "___" in raw_label:
+            return raw_label.split("___")[0]
+        return raw_label
+
+    def get_last_raw_results(self):
+        """Return the last raw HuggingFace results for disease detection."""
+        return self._last_raw_results
+
+
 class PlaceholderSpeciesModel:
     """
-    Placeholder model for demonstration.
+    Fallback placeholder model when transformers is not available.
 
-    Returns realistic-looking predictions for testing the pipeline.
-    Replace with actual PyTorch model in production.
+    Returns random predictions for testing the pipeline structure.
     """
 
     def __init__(self, num_classes: int, architecture: str):
         self.num_classes = num_classes
         self.architecture = architecture
+        self._last_raw_results = None
 
     def forward(self, x: np.ndarray) -> dict:
-        """
-        Generate placeholder predictions.
-
-        In production, this would be:
-        ```python
-        with torch.no_grad():
-            features = self.backbone(x)
-            family_logits = self.family_head(features)
-            genus_logits = self.genus_head(features)
-            species_logits = self.species_head(features)
-
-            return {
-                "family_probs": F.softmax(family_logits, dim=1),
-                "genus_probs": F.softmax(genus_logits, dim=1),
-                "species_probs": F.softmax(species_logits, dim=1),
-                "features": features  # For Grad-CAM
-            }
-        ```
-        """
+        """Generate random placeholder predictions."""
         batch_size = x.shape[0]
 
-        # Generate plausible predictions
-        # Simulates a model that's reasonably confident
-        species_logits = np.random.randn(batch_size, self.num_classes)
+        # Generate plausible predictions (random but deterministic for same input)
+        # Use image mean as seed for reproducibility within session
+        seed = int(np.abs(x.mean()) * 1000000) % (2**31)
+        rng = np.random.RandomState(seed)
 
-        # Make one class more prominent (simulating learned patterns)
-        dominant_class = np.random.randint(0, self.num_classes)
-        species_logits[:, dominant_class] += 3.0  # Higher logit for dominant class
+        species_logits = rng.randn(batch_size, self.num_classes)
+        dominant_class = rng.randint(0, self.num_classes)
+        species_logits[:, dominant_class] += 3.0
 
-        # Softmax
         species_probs = self._softmax(species_logits)
 
         return {
             "species_probs": species_probs,
-            "features": np.random.randn(batch_size, 1280)  # Feature vector
+            "features": np.zeros((batch_size, 1280))
         }
 
     def _softmax(self, x: np.ndarray) -> np.ndarray:
         """Compute softmax values."""
         exp_x = np.exp(x - np.max(x, axis=1, keepdims=True))
         return exp_x / np.sum(exp_x, axis=1, keepdims=True)
+
+    def get_last_raw_results(self):
+        """Placeholder has no raw results."""
+        return None

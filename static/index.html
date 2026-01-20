@@ -148,6 +148,54 @@
                         <option value="grape">Grape</option>
                     </select>
                 </div>
+
+                <!-- Model Selection for Compare Mode -->
+                <div class="option-group compare-models-option" id="modelSelectionPanel" style="display: none;">
+                    <h4 class="model-selection-title">Select Models to Compare</h4>
+                    <p class="model-selection-hint">Choose which models to run your image through for comparison</p>
+
+                    <div class="model-checkboxes">
+                        <label class="model-checkbox">
+                            <input type="checkbox" id="modelInternal" value="internal" checked>
+                            <span class="checkbox-custom"></span>
+                            <div class="model-info">
+                                <span class="model-name">Internal Model</span>
+                                <span class="model-desc">Our MobileNetV2-based classifier with species + disease detection</span>
+                                <span class="model-badge real">Real ML</span>
+                            </div>
+                        </label>
+
+                        <label class="model-checkbox">
+                            <input type="checkbox" id="modelMobileNet" value="mobilenet_v2" checked>
+                            <span class="checkbox-custom"></span>
+                            <div class="model-info">
+                                <span class="model-name">MobileNetV2 (HuggingFace)</span>
+                                <span class="model-desc">38 PlantVillage classes, ~95.4% accuracy</span>
+                                <span class="model-badge hf">HuggingFace</span>
+                            </div>
+                        </label>
+
+                        <label class="model-checkbox">
+                            <input type="checkbox" id="modelViT" value="vit_crop">
+                            <span class="checkbox-custom"></span>
+                            <div class="model-info">
+                                <span class="model-name">ViT Crop Diseases (HuggingFace)</span>
+                                <span class="model-desc">14 classes (Corn, Potato, Rice, Wheat), ~98% accuracy</span>
+                                <span class="model-badge hf">HuggingFace</span>
+                            </div>
+                        </label>
+
+                        <label class="model-checkbox">
+                            <input type="checkbox" id="modelPlantNet" value="plantnet">
+                            <span class="checkbox-custom"></span>
+                            <div class="model-info">
+                                <span class="model-name">Pl@ntNet API</span>
+                                <span class="model-desc">50,000+ species (requires PLANTNET_API_KEY)</span>
+                                <span class="model-badge api">External API</span>
+                            </div>
+                        </label>
+                    </div>
+                </div>
             </div>
 
             <!-- Analyze Button -->
@@ -267,6 +315,22 @@
             <div class="batch-results" id="batchResults" style="display: none;">
                 <div class="batch-summary" id="batchSummary"></div>
                 <div class="batch-grid" id="batchGrid"></div>
+            </div>
+
+            <!-- Comparison Results -->
+            <div class="comparison-results" id="comparisonResults" style="display: none;">
+                <div class="comparison-header">
+                    <h3>Model Comparison Results</h3>
+                    <div class="agreement-score" id="agreementScore"></div>
+                </div>
+
+                <div class="comparison-recommendation" id="comparisonRecommendation"></div>
+
+                <div class="comparison-grid" id="comparisonGrid">
+                    <!-- Model results will be inserted here -->
+                </div>
+
+                <div class="comparison-meta" id="comparisonMeta"></div>
             </div>
         </div>
 
