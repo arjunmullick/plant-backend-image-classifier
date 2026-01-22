@@ -6,6 +6,15 @@ Provides comprehensive disease analysis by:
 2. Aggregating results with confidence-weighted voting
 3. Determining disease severity
 4. Generating localized treatment recommendations
+
+Treatment data is loaded from external JSON files.
+See data/treatments/disease_treatments.json for the data format.
+
+Recommended Data Sources:
+- PlantVillage (Penn State): https://plantvillage.psu.edu/
+- EPPO Global Database: https://gd.eppo.int/
+- UC Davis IPM: https://ipm.ucanr.edu/
+- CABI Crop Protection Compendium: https://www.cabi.org/cpc/
 """
 
 import logging
@@ -19,6 +28,10 @@ from app.ml.external_models import (
     get_external_model_registry,
     ExternalModelType,
     ExternalModelResult,
+)
+from app.services.treatment_data_loader import (
+    get_treatment_loader,
+    TreatmentDataLoader,
 )
 
 logger = logging.getLogger(__name__)
@@ -68,6 +81,7 @@ class SeverityAssessment:
     factors: List[str]
     urgency: str
     action_timeline: str
+    is_fallback: bool = False  # True if severity data not found in database
 
 
 @dataclass
@@ -81,6 +95,8 @@ class LocalizedTreatment:
     estimated_recovery: str
     regional_notes: Optional[str] = None
     weather_considerations: Optional[str] = None
+    data_source: str = "Unknown"
+    is_fallback: bool = False  # True if treatment data not found in database
 
 
 @dataclass
@@ -93,349 +109,21 @@ class EarlyWarningResult:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
-# Disease severity database - maps diseases to base severity and characteristics
-DISEASE_SEVERITY_DATABASE = {
-    # Tomato diseases
-    "early blight": {
-        "base_severity": 60,
-        "spread_rate": "moderate",
-        "crop_impact": "Can cause 20-50% yield loss",
-        "urgency": "Act within 3-5 days"
-    },
-    "late blight": {
-        "base_severity": 90,
-        "spread_rate": "rapid",
-        "crop_impact": "Can destroy entire crop within 7-10 days",
-        "urgency": "Immediate action required"
-    },
-    "bacterial spot": {
-        "base_severity": 55,
-        "spread_rate": "moderate",
-        "crop_impact": "Reduces fruit quality and marketability",
-        "urgency": "Act within 5-7 days"
-    },
-    "leaf mold": {
-        "base_severity": 45,
-        "spread_rate": "slow",
-        "crop_impact": "Reduces photosynthesis, 10-30% yield loss",
-        "urgency": "Monitor and treat within 7-10 days"
-    },
-    "septoria leaf spot": {
-        "base_severity": 50,
-        "spread_rate": "moderate",
-        "crop_impact": "Defoliation leads to sunscald on fruit",
-        "urgency": "Act within 5-7 days"
-    },
-    "spider mites": {
-        "base_severity": 40,
-        "spread_rate": "rapid in hot weather",
-        "crop_impact": "Stunted growth, reduced yield",
-        "urgency": "Monitor closely, treat if spreading"
-    },
-    "target spot": {
-        "base_severity": 55,
-        "spread_rate": "moderate",
-        "crop_impact": "Defoliation and fruit lesions",
-        "urgency": "Act within 5-7 days"
-    },
-    "yellow leaf curl virus": {
-        "base_severity": 85,
-        "spread_rate": "rapid via whiteflies",
-        "crop_impact": "Severe stunting, 50-100% yield loss",
-        "urgency": "Immediate vector control needed"
-    },
-    "mosaic virus": {
-        "base_severity": 70,
-        "spread_rate": "moderate",
-        "crop_impact": "Mottled leaves, reduced fruit quality",
-        "urgency": "Remove infected plants immediately"
-    },
-
-    # Potato diseases
-    "potato early blight": {
-        "base_severity": 55,
-        "spread_rate": "moderate",
-        "crop_impact": "Tuber quality reduction",
-        "urgency": "Act within 5-7 days"
-    },
-    "potato late blight": {
-        "base_severity": 95,
-        "spread_rate": "extremely rapid",
-        "crop_impact": "Complete crop loss possible",
-        "urgency": "Emergency action required"
-    },
-
-    # Apple diseases
-    "apple scab": {
-        "base_severity": 65,
-        "spread_rate": "moderate in wet conditions",
-        "crop_impact": "Fruit unmarketable, defoliation",
-        "urgency": "Preventive sprays critical"
-    },
-    "black rot": {
-        "base_severity": 70,
-        "spread_rate": "moderate",
-        "crop_impact": "Fruit rot, cankers on branches",
-        "urgency": "Act within 3-5 days"
-    },
-    "cedar apple rust": {
-        "base_severity": 50,
-        "spread_rate": "slow",
-        "crop_impact": "Defoliation, reduced fruit size",
-        "urgency": "Preventive management needed"
-    },
-
-    # Corn diseases
-    "common rust": {
-        "base_severity": 45,
-        "spread_rate": "moderate",
-        "crop_impact": "10-20% yield loss if severe",
-        "urgency": "Monitor, treat if spreading rapidly"
-    },
-    "gray leaf spot": {
-        "base_severity": 60,
-        "spread_rate": "moderate to rapid",
-        "crop_impact": "Significant yield reduction",
-        "urgency": "Act within 5-7 days"
-    },
-    "northern leaf blight": {
-        "base_severity": 65,
-        "spread_rate": "moderate",
-        "crop_impact": "30-50% yield loss possible",
-        "urgency": "Act within 5-7 days"
-    },
-    "leaf blight": {
-        "base_severity": 60,
-        "spread_rate": "moderate",
-        "crop_impact": "Reduced photosynthesis and yield",
-        "urgency": "Act within 5-7 days"
-    },
-
-    # Grape diseases
-    "grape black rot": {
-        "base_severity": 75,
-        "spread_rate": "rapid in humid conditions",
-        "crop_impact": "Total fruit loss possible",
-        "urgency": "Immediate fungicide application"
-    },
-    "esca": {
-        "base_severity": 80,
-        "spread_rate": "slow but chronic",
-        "crop_impact": "Vine decline and death",
-        "urgency": "Long-term management needed"
-    },
-    "grape leaf blight": {
-        "base_severity": 55,
-        "spread_rate": "moderate",
-        "crop_impact": "Reduced fruit quality",
-        "urgency": "Act within 5-7 days"
-    },
-
-    # Rice diseases
-    "brown spot": {
-        "base_severity": 50,
-        "spread_rate": "moderate",
-        "crop_impact": "Grain discoloration, 10-30% loss",
-        "urgency": "Act within 7 days"
-    },
-    "leaf blast": {
-        "base_severity": 85,
-        "spread_rate": "very rapid",
-        "crop_impact": "Can destroy entire field",
-        "urgency": "Emergency action required"
-    },
-
-    # Wheat diseases
-    "brown rust": {
-        "base_severity": 60,
-        "spread_rate": "rapid",
-        "crop_impact": "20-40% yield loss",
-        "urgency": "Act within 3-5 days"
-    },
-    "yellow rust": {
-        "base_severity": 75,
-        "spread_rate": "very rapid",
-        "crop_impact": "50-70% yield loss possible",
-        "urgency": "Immediate action required"
-    },
-}
-
-# Enhanced treatment database with severity-based recommendations
-LOCALIZED_TREATMENT_DATABASE = {
-    "early blight": {
-        "immediate_actions": [
-            "Remove and destroy infected leaves immediately",
-            "Increase plant spacing for better air circulation",
-            "Avoid overhead watering - use drip irrigation",
-            "Apply mulch to prevent soil splash"
-        ],
-        "organic_treatments": [
-            "Copper-based fungicide (Bordeaux mixture) - apply every 7-10 days",
-            "Neem oil spray (2-3 tablespoons per gallon) weekly",
-            "Baking soda solution (1 tbsp per gallon + soap) as preventive",
-            "Compost tea foliar spray to boost plant immunity"
-        ],
-        "chemical_treatments": [
-            "Chlorothalonil (Daconil) - apply at first sign, repeat every 7-14 days",
-            "Mancozeb - effective preventive, apply before symptoms appear",
-            "Azoxystrobin (Quadris) - systemic protection for 14-21 days"
-        ],
-        "prevention_measures": [
-            "Rotate crops - don't plant tomatoes/potatoes in same spot for 3 years",
-            "Use disease-resistant varieties (Mountain Merit, Defiant)",
-            "Remove plant debris at end of season",
-            "Stake plants to keep foliage off ground"
-        ],
-        "monitoring_schedule": "Inspect plants every 2-3 days during humid weather",
-        "estimated_recovery": "2-4 weeks with proper treatment"
-    },
-    "late blight": {
-        "immediate_actions": [
-            "URGENT: Remove and bag infected plants immediately",
-            "Do NOT compost - burn or dispose in sealed bags",
-            "Spray remaining plants with fungicide within 24 hours",
-            "Alert neighboring farmers - disease spreads rapidly"
-        ],
-        "organic_treatments": [
-            "Copper hydroxide - higher rates than for early blight",
-            "Bacillus subtilis (Serenade) - apply every 5-7 days",
-            "Potassium bicarbonate sprays for prevention"
-        ],
-        "chemical_treatments": [
-            "Mefenoxam/Metalaxyl (Ridomil) - systemic, very effective",
-            "Cymoxanil + Mancozeb combination for resistance management",
-            "Fluopicolide (Presidio) - excellent curative action",
-            "Mandipropamid (Revus) - rainfast protection"
-        ],
-        "prevention_measures": [
-            "Use only certified disease-free seed potatoes",
-            "Plant resistant varieties when available",
-            "Destroy volunteer potatoes and tomatoes",
-            "Monitor weather - apply preventive sprays before rain events"
-        ],
-        "monitoring_schedule": "Daily inspection during disease-favorable weather",
-        "estimated_recovery": "Disease is often fatal - focus on protecting remaining plants"
-    },
-    "bacterial spot": {
-        "immediate_actions": [
-            "Reduce leaf wetness - avoid overhead irrigation",
-            "Remove severely infected leaves",
-            "Disinfect tools between plants (10% bleach solution)"
-        ],
-        "organic_treatments": [
-            "Copper-based bactericides (must apply before infection)",
-            "Acibenzolar-S-methyl (Actigard) to induce plant resistance",
-            "Bacteriophage products where available"
-        ],
-        "chemical_treatments": [
-            "Copper + Mancozeb tank mix for better efficacy",
-            "Streptomycin (where legal) for severe outbreaks"
-        ],
-        "prevention_measures": [
-            "Use certified disease-free transplants",
-            "Hot water seed treatment (122°F for 25 minutes)",
-            "Avoid working with wet plants",
-            "Resistant varieties: BHN 444, Mountain Magic"
-        ],
-        "monitoring_schedule": "Check every 3-4 days, especially after rain",
-        "estimated_recovery": "3-4 weeks; may persist throughout season"
-    },
-    "common rust": {
-        "immediate_actions": [
-            "Scout field edges and low areas first",
-            "Calculate disease severity to determine treatment need",
-            "Check weather forecast for conditions favoring rust"
-        ],
-        "organic_treatments": [
-            "Sulfur-based fungicides - apply early",
-            "Neem oil can slow progression",
-            "Remove heavily infected plants in small gardens"
-        ],
-        "chemical_treatments": [
-            "Triazole fungicides (propiconazole, tebuconazole)",
-            "Strobilurin fungicides (azoxystrobin, pyraclostrobin)",
-            "Apply at tasseling if disease is present and spreading"
-        ],
-        "prevention_measures": [
-            "Plant rust-resistant hybrids",
-            "Early planting to avoid peak rust season",
-            "Balanced fertilization - avoid excess nitrogen"
-        ],
-        "monitoring_schedule": "Weekly scouting from V8 through grain fill",
-        "estimated_recovery": "Plants can recover if treated early; late infections have less impact"
-    },
-    "powdery mildew": {
-        "immediate_actions": [
-            "Improve air circulation around plants",
-            "Remove heavily infected leaves",
-            "Reduce nitrogen fertilization"
-        ],
-        "organic_treatments": [
-            "Milk spray (40% milk to water ratio) - surprisingly effective",
-            "Potassium bicarbonate (1 tbsp per gallon)",
-            "Neem oil weekly applications",
-            "Sulfur dust or spray (not in hot weather)"
-        ],
-        "chemical_treatments": [
-            "Myclobutanil (Immunox) - systemic protection",
-            "Trifloxystrobin (Flint) - excellent control",
-            "Chlorothalonil for prevention"
-        ],
-        "prevention_measures": [
-            "Plant in full sun with good air circulation",
-            "Use resistant varieties",
-            "Water at soil level, not on leaves",
-            "Space plants adequately"
-        ],
-        "monitoring_schedule": "Check undersides of leaves weekly",
-        "estimated_recovery": "2-3 weeks with consistent treatment"
-    },
-    "yellow leaf curl virus": {
-        "immediate_actions": [
-            "Remove and destroy infected plants immediately",
-            "Control whitefly vectors aggressively",
-            "Use yellow sticky traps to monitor whiteflies",
-            "Cover young plants with insect netting"
-        ],
-        "organic_treatments": [
-            "Insecticidal soap for whitefly control",
-            "Neem oil (repels whiteflies)",
-            "Release beneficial insects (Encarsia formosa)",
-            "Reflective mulch to repel whiteflies"
-        ],
-        "chemical_treatments": [
-            "Imidacloprid soil drench for whitefly control",
-            "Pyriproxyfen (insect growth regulator)",
-            "Spiromesifen (Oberon) - excellent whitefly control"
-        ],
-        "prevention_measures": [
-            "Use virus-resistant varieties (Ty genes)",
-            "Screen greenhouse openings",
-            "Remove weed hosts around fields",
-            "Avoid planting near infected fields"
-        ],
-        "monitoring_schedule": "Daily whitefly monitoring; remove infected plants immediately",
-        "estimated_recovery": "No cure - focus on vector control and removing infected plants"
-    },
-}
-
-# Regional treatment notes
-REGIONAL_NOTES = {
-    "US-CA": "California: Check local restrictions on copper applications. Organic options preferred in many areas.",
-    "US-FL": "Florida: High humidity increases disease pressure. More frequent applications may be needed.",
-    "US-TX": "Texas: Heat stress compounds disease issues. Water management critical.",
-    "EU": "European Union: Many conventional pesticides restricted. Focus on integrated pest management.",
-    "IN-MH": "Maharashtra: Monsoon season increases fungal disease risk. Post-rain applications critical.",
-    "IN-KA": "Karnataka: Coffee-growing regions have specific disease pressures. Consult local extension.",
-    "AU": "Australia: Strict biosecurity - report unusual diseases. Many chemicals require permits.",
-}
-
-
 class EarlyWarningService:
     """Service for comprehensive crop disease early warning."""
 
     def __init__(self):
         self.registry = get_external_model_registry()
+        self.treatment_loader = get_treatment_loader()
+
+        # Log data loading status
+        metadata = self.treatment_loader.get_metadata()
+        if metadata["loaded"]:
+            logger.info(f"Treatment data loaded: {metadata['disease_count']} diseases, "
+                       f"sources: {metadata['data_sources']}")
+        else:
+            logger.warning(f"Treatment data not loaded: {metadata['load_error']}. "
+                          f"Using fallback responses.")
 
     async def analyze(
         self,
@@ -483,13 +171,16 @@ class EarlyWarningService:
         # Determine consensus disease
         consensus = self._determine_consensus(predictions)
 
-        # Calculate severity
+        # Calculate severity (uses data loader)
         severity = self._calculate_severity(consensus, predictions)
 
-        # Generate treatment recommendations
+        # Generate treatment recommendations (uses data loader)
         treatment = self._generate_treatment(consensus, severity, region)
 
         total_time = (time.time() - start_time) * 1000
+
+        # Get data loader metadata
+        loader_metadata = self.treatment_loader.get_metadata()
 
         return EarlyWarningResult(
             model_predictions=predictions,
@@ -500,7 +191,15 @@ class EarlyWarningService:
                 "total_processing_time_ms": total_time,
                 "models_consulted": len(predictions),
                 "region": region,
-                "analysis_timestamp": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
+                "analysis_timestamp": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()),
+                "treatment_data": {
+                    "loaded": loader_metadata["loaded"],
+                    "disease_count": loader_metadata["disease_count"],
+                    "data_sources": loader_metadata["data_sources"],
+                    "last_updated": loader_metadata["last_updated"],
+                },
+                "severity_is_fallback": severity.is_fallback,
+                "treatment_is_fallback": treatment.is_fallback,
             }
         )
 
@@ -510,13 +209,8 @@ class EarlyWarningService:
         include_internal: bool
     ) -> Dict[str, ExternalModelResult]:
         """Run all available models in parallel."""
-
-        # Get all model types
         all_model_types = list(ExternalModelType)
-
-        # Run comparison
         results = await self.registry.run_comparison(image, model_types=all_model_types)
-
         return results
 
     def _create_predictions(
@@ -527,7 +221,6 @@ class EarlyWarningService:
         predictions = []
 
         for model_key, result in results.items():
-            # Generate explanation based on result
             explanation, factors = self._generate_explanation(result)
 
             predictions.append(ModelPrediction(
@@ -556,7 +249,6 @@ class EarlyWarningService:
         prediction = result.prediction.lower()
         confidence = result.confidence or 0
 
-        # Build explanation based on confidence and prediction
         factors = []
 
         if confidence >= 0.9:
@@ -572,7 +264,6 @@ class EarlyWarningService:
             confidence_text = "low confidence"
             factors.append("Weak or ambiguous indicators")
 
-        # Add model-specific factors
         additional = result.additional_info or {}
 
         if additional.get("crop"):
@@ -594,8 +285,6 @@ class EarlyWarningService:
 
     def _determine_consensus(self, predictions: List[ModelPrediction]) -> DiseaseConsensus:
         """Determine consensus disease from all predictions."""
-
-        # Filter out errors and get valid predictions
         valid_predictions = [p for p in predictions if not p.error and p.prediction]
 
         if not valid_predictions:
@@ -609,11 +298,9 @@ class EarlyWarningService:
                 reasoning="No models could make a valid prediction"
             )
 
-        # Normalize predictions for comparison
         def normalize(pred: str) -> str:
             return pred.lower().strip().replace("_", " ").replace("-", " ")
 
-        # Count votes with confidence weighting
         disease_votes = {}
         healthy_votes = 0
         total_confidence = 0
@@ -637,7 +324,6 @@ class EarlyWarningService:
 
             total_confidence += pred.confidence
 
-        # Determine winner
         is_healthy = healthy_votes > sum(d["confidence_sum"] for d in disease_votes.values())
 
         if is_healthy:
@@ -655,7 +341,6 @@ class EarlyWarningService:
                 reasoning=f"{len(healthy_supporters)} out of {len(valid_predictions)} models detected no disease. The plant appears healthy."
             )
 
-        # Find top disease
         if disease_votes:
             top_disease = max(disease_votes.items(), key=lambda x: x[1]["confidence_sum"])
             disease_name = top_disease[1]["original_name"]
@@ -666,7 +351,6 @@ class EarlyWarningService:
             dissenters = [p.model_name for p in valid_predictions
                          if normalize(p.prediction) != top_disease[0] and p.model_name not in supporters]
 
-            # Build reasoning
             if agreement >= 0.8:
                 reasoning = f"Strong consensus: {len(supporters)} out of {len(valid_predictions)} models identified {disease_name}. High confidence in diagnosis."
             elif agreement >= 0.5:
@@ -699,7 +383,7 @@ class EarlyWarningService:
         consensus: DiseaseConsensus,
         predictions: List[ModelPrediction]
     ) -> SeverityAssessment:
-        """Calculate disease severity based on consensus and disease characteristics."""
+        """Calculate disease severity using data from treatment loader."""
 
         if consensus.is_healthy:
             return SeverityAssessment(
@@ -707,28 +391,22 @@ class EarlyWarningService:
                 score=0,
                 factors=["No disease detected", "Plant appears healthy"],
                 urgency="No immediate action required",
-                action_timeline="Continue regular monitoring and preventive care"
+                action_timeline="Continue regular monitoring and preventive care",
+                is_fallback=False
             )
 
-        # Look up disease in database
-        disease_key = consensus.disease_name.lower().strip()
-        disease_info = None
+        # Get severity data from loader
+        severity_data = self.treatment_loader.get_severity(consensus.disease_name)
+        is_fallback = severity_data.is_fallback
 
-        for key, info in DISEASE_SEVERITY_DATABASE.items():
-            if key in disease_key or disease_key in key:
-                disease_info = info
-                break
-
-        # Calculate severity score
         factors = []
 
-        # Base severity from disease database
-        if disease_info:
-            base_severity = disease_info["base_severity"]
-            factors.append(f"Base severity for {consensus.disease_name}: {base_severity}/100")
+        # Base severity from database
+        base_severity = severity_data.base_severity
+        if is_fallback:
+            factors.append(f"⚠️ FALLBACK: '{consensus.disease_name}' not in database, using default severity (50)")
         else:
-            base_severity = 50  # Default moderate
-            factors.append("Disease not in database - using moderate baseline")
+            factors.append(f"Base severity for {consensus.disease_name}: {base_severity}/100")
 
         # Adjust based on confidence
         confidence_modifier = 0
@@ -774,20 +452,18 @@ class EarlyWarningService:
             level = SeverityLevel.HEALTHY
             urgency = "No action needed"
 
-        # Get action timeline from disease info
-        if disease_info:
-            action_timeline = disease_info.get("urgency", urgency)
-            factors.append(f"Spread rate: {disease_info.get('spread_rate', 'unknown')}")
-            factors.append(f"Potential impact: {disease_info.get('crop_impact', 'unknown')}")
-        else:
-            action_timeline = urgency
+        # Add spread rate and impact info from data
+        if not is_fallback:
+            factors.append(f"Spread rate: {severity_data.spread_rate}")
+            factors.append(f"Potential impact: {severity_data.crop_impact}")
 
         return SeverityAssessment(
             level=level,
             score=final_score,
             factors=factors,
             urgency=urgency,
-            action_timeline=action_timeline
+            action_timeline=urgency,
+            is_fallback=is_fallback
         )
 
     def _generate_treatment(
@@ -796,12 +472,15 @@ class EarlyWarningService:
         severity: SeverityAssessment,
         region: Optional[str]
     ) -> LocalizedTreatment:
-        """Generate localized treatment recommendations."""
+        """Generate treatment recommendations using data from treatment loader."""
 
         if consensus.is_healthy:
             return LocalizedTreatment(
                 immediate_actions=["Continue regular care and monitoring"],
-                organic_treatments=["Preventive neem oil spray every 2 weeks", "Compost tea foliar applications for plant immunity"],
+                organic_treatments=[
+                    "Preventive neem oil spray every 2 weeks",
+                    "Compost tea foliar applications for plant immunity"
+                ],
                 chemical_treatments=["No chemical treatment needed for healthy plants"],
                 prevention_measures=[
                     "Maintain proper watering schedule",
@@ -811,69 +490,57 @@ class EarlyWarningService:
                 ],
                 monitoring_schedule="Weekly visual inspection recommended",
                 estimated_recovery="N/A - Plant is healthy",
-                regional_notes=REGIONAL_NOTES.get(region)
+                regional_notes=self._get_regional_notes(region),
+                data_source="Standard healthy plant care",
+                is_fallback=False
             )
 
-        # Look up treatment in database
-        disease_key = consensus.disease_name.lower().strip()
-        treatment_info = None
+        # Get treatment data from loader
+        treatment_data = self.treatment_loader.get_treatment(consensus.disease_name)
+        is_fallback = treatment_data.is_fallback
 
-        for key, info in LOCALIZED_TREATMENT_DATABASE.items():
-            if key in disease_key or disease_key in key:
-                treatment_info = info
-                break
+        # Get regional notes
+        regional_notes = self._get_regional_notes(region)
 
-        if treatment_info:
-            # Adjust treatments based on severity
-            immediate = treatment_info["immediate_actions"].copy()
+        # Adjust treatments based on severity
+        immediate_actions = treatment_data.immediate_actions.copy()
 
-            if severity.level == SeverityLevel.CRITICAL:
-                immediate.insert(0, "⚠️ CRITICAL: This is an emergency situation")
-                immediate.insert(1, "Document with photos and contact local agricultural extension")
+        if severity.level == SeverityLevel.CRITICAL and not is_fallback:
+            immediate_actions.insert(0, "⚠️ CRITICAL: This is an emergency situation requiring immediate action")
+            immediate_actions.insert(1, "Document with photos and contact local agricultural extension")
 
-            return LocalizedTreatment(
-                immediate_actions=immediate,
-                organic_treatments=treatment_info["organic_treatments"],
-                chemical_treatments=treatment_info["chemical_treatments"],
-                prevention_measures=treatment_info["prevention_measures"],
-                monitoring_schedule=treatment_info["monitoring_schedule"],
-                estimated_recovery=treatment_info["estimated_recovery"],
-                regional_notes=REGIONAL_NOTES.get(region),
-                weather_considerations="Monitor weather forecasts - humid conditions increase disease spread"
-            )
+        # Add fallback warning if applicable
+        if is_fallback:
+            immediate_actions.insert(0, f"⚠️ FALLBACK RESPONSE: No specific data for '{consensus.disease_name}'")
 
-        # Generic treatment for unknown diseases
         return LocalizedTreatment(
-            immediate_actions=[
-                "Isolate affected plants if possible",
-                "Remove and destroy severely infected plant parts",
-                "Improve air circulation around plants",
-                "Photograph symptoms for expert consultation"
-            ],
-            organic_treatments=[
-                "Copper-based fungicide as general treatment",
-                "Neem oil spray for fungal/pest issues",
-                "Baking soda solution (1 tbsp/gallon) for fungal problems"
-            ],
-            chemical_treatments=[
-                "Consult local agricultural extension for specific recommendations",
-                "Broad-spectrum fungicide may help if fungal origin suspected"
-            ],
-            prevention_measures=[
-                "Practice crop rotation",
-                "Use disease-resistant varieties when replanting",
-                "Maintain proper plant nutrition",
-                "Ensure good drainage"
-            ],
-            monitoring_schedule="Daily monitoring until disease is identified",
-            estimated_recovery="Varies - consult local experts for specific disease",
-            regional_notes=REGIONAL_NOTES.get(region),
-            weather_considerations="Reduce irrigation during treatment period if disease is fungal"
+            immediate_actions=immediate_actions,
+            organic_treatments=treatment_data.organic_treatments,
+            chemical_treatments=treatment_data.chemical_treatments,
+            prevention_measures=treatment_data.prevention_measures,
+            monitoring_schedule=treatment_data.monitoring_schedule,
+            estimated_recovery=treatment_data.estimated_recovery,
+            regional_notes=regional_notes,
+            weather_considerations="Monitor weather forecasts - humid conditions increase disease spread" if not is_fallback else "Consult local agricultural extension for weather-specific advice",
+            data_source=treatment_data.data_source,
+            is_fallback=is_fallback
         )
+
+    def _get_regional_notes(self, region: Optional[str]) -> Optional[str]:
+        """Get regional notes for the specified region."""
+        if not region:
+            return None
+
+        regional_data = self.treatment_loader.get_regional_notes(region)
+        if regional_data:
+            return regional_data.notes
+
+        return f"No specific notes for region '{region}'. Consult local agricultural extension."
 
 
 # Singleton instance
 _early_warning_service = None
+
 
 def get_early_warning_service() -> EarlyWarningService:
     """Get the early warning service singleton."""

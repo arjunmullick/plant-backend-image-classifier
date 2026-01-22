@@ -2455,6 +2455,86 @@ body {
     color: var(--color-text-muted);
 }
 
+/* Fallback Indicator Styles */
+.fallback-warning {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    padding: var(--space-md);
+    background: linear-gradient(135deg, #fff3cd 0%, #ffeaa0 100%);
+    border: 1px solid #ffca2c;
+    border-radius: var(--radius-md);
+    margin-bottom: var(--space-md);
+    color: #856404;
+    font-size: 0.85rem;
+    font-weight: 500;
+}
+
+.fallback-warning svg {
+    flex-shrink: 0;
+    color: #d39e00;
+}
+
+.fallback-warning.severity-fallback {
+    background: linear-gradient(135deg, #fff3cd 0%, #ffeeba 100%);
+}
+
+.fallback-warning.treatment-fallback {
+    background: linear-gradient(135deg, #ffeeba 0%, #fff3cd 100%);
+}
+
+.data-source-info {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    padding: var(--space-sm) var(--space-md);
+    background: var(--color-info-light);
+    border-radius: var(--radius-md);
+    font-size: 0.8rem;
+    color: var(--color-info);
+    margin-top: var(--space-md);
+}
+
+.data-source-info svg {
+    flex-shrink: 0;
+}
+
+.data-source-info.fallback {
+    background: linear-gradient(135deg, #fff3cd 0%, #ffeeba 100%);
+    color: #856404;
+    border: 1px solid #ffca2c;
+}
+
+.treatment-item-ew.fallback-item {
+    background: linear-gradient(135deg, #fff3cd 0%, #ffffff 100%);
+    border-left: 3px solid #ffca2c;
+}
+
+.ew-meta-fallback {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+    margin-top: var(--space-sm);
+}
+
+.fallback-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    background: #fff3cd;
+    border: 1px solid #ffca2c;
+    border-radius: var(--radius-full);
+    font-size: 0.7rem;
+    color: #856404;
+    font-weight: 500;
+}
+
+.fallback-badge svg {
+    width: 12px;
+    height: 12px;
+}
+
 /* Responsive Early Warning */
 @media (max-width: 768px) {
     .severity-banner {
@@ -2476,6 +2556,11 @@ body {
     }
 
     .ew-meta-info {
+        flex-direction: column;
+        text-align: center;
+    }
+
+    .fallback-warning {
         flex-direction: column;
         text-align: center;
     }

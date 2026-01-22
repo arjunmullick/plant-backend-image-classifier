@@ -670,14 +670,41 @@ function displayEarlyWarningResults(data) {
     // Display severity factors
     displaySeverityFactors(data.severity);
 
-    // Display meta
+    // Display meta with fallback indicators
     if (elements.ewMeta) {
+        const severityFallback = data.metadata?.severity_is_fallback;
+        const treatmentFallback = data.metadata?.treatment_is_fallback;
+        const treatmentData = data.metadata?.treatment_data || {};
+
         elements.ewMeta.innerHTML = `
             <div class="ew-meta-info">
                 <span>Analysis completed in ${data.metadata?.total_processing_time_ms?.toFixed(0) || '?'}ms</span>
                 <span>Models consulted: ${data.metadata?.models_consulted || '?'}</span>
                 ${data.metadata?.region ? `<span>Region: ${data.metadata.region}</span>` : ''}
+                ${treatmentData.loaded ? `<span>Treatment database: ${treatmentData.disease_count} diseases</span>` : ''}
             </div>
+            ${(severityFallback || treatmentFallback) ? `
+                <div class="ew-meta-fallback">
+                    ${severityFallback ? `
+                        <span class="fallback-badge">
+                            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                                <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                            </svg>
+                            Severity: Fallback
+                        </span>
+                    ` : ''}
+                    ${treatmentFallback ? `
+                        <span class="fallback-badge">
+                            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                                <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                            </svg>
+                            Treatment: Fallback
+                        </span>
+                    ` : ''}
+                </div>
+            ` : ''}
         `;
     }
 }
@@ -698,6 +725,27 @@ function displaySeverityBanner(severity, consensus) {
         ? 'Plant Appears Healthy'
         : consensus.disease_name;
     elements.severityTimeline.textContent = severity.urgency;
+
+    // Show fallback indicator in severity section if applicable
+    const severitySection = document.getElementById('severitySection');
+    if (severitySection) {
+        let existingWarning = severitySection.querySelector('.fallback-warning');
+        if (existingWarning) existingWarning.remove();
+
+        if (severity.is_fallback) {
+            const warningDiv = document.createElement('div');
+            warningDiv.className = 'fallback-warning severity-fallback';
+            warningDiv.innerHTML = `
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                    <line x1="12" y1="9" x2="12" y2="13"/>
+                    <line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+                <span><strong>FALLBACK:</strong> Severity data for this disease is not in our database. Using default moderate severity (50).</span>
+            `;
+            banner.insertAdjacentElement('afterend', warningDiv);
+        }
+    }
 }
 
 function displayConsensus(consensus) {
@@ -818,9 +866,43 @@ function displayEWTreatment(treatment) {
     ewTreatmentData = treatment;
     displayEWTreatmentTab('immediate');
 
+    // Display fallback warning if applicable
+    const treatmentCard = document.getElementById('treatmentCardEW');
+    let existingWarning = treatmentCard?.querySelector('.fallback-warning');
+    if (existingWarning) existingWarning.remove();
+
+    if (treatment.is_fallback && treatmentCard) {
+        const warningDiv = document.createElement('div');
+        warningDiv.className = 'fallback-warning treatment-fallback';
+        warningDiv.innerHTML = `
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                <line x1="12" y1="9" x2="12" y2="13"/>
+                <line x1="12" y1="17" x2="12.01" y2="17"/>
+            </svg>
+            <span><strong>FALLBACK RESPONSE:</strong> This disease is not in our treatment database. The recommendations shown are general guidelines. Please consult your local agricultural extension service for specific advice.</span>
+        `;
+        const cardContent = treatmentCard.querySelector('.card-content');
+        if (cardContent) {
+            cardContent.insertBefore(warningDiv, cardContent.firstChild);
+        }
+    }
+
     // Display meta info
     if (elements.treatmentMetaEW) {
         elements.treatmentMetaEW.innerHTML = `
+            ${treatment.data_source ? `
+                <div class="data-source-info ${treatment.is_fallback ? 'fallback' : ''}">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                        <polyline points="14 2 14 8 20 8"/>
+                        <line x1="16" y1="13" x2="8" y2="13"/>
+                        <line x1="16" y1="17" x2="8" y2="17"/>
+                        <polyline points="10 9 9 9 8 9"/>
+                    </svg>
+                    <span><strong>Data Source:</strong> ${treatment.data_source}</span>
+                </div>
+            ` : ''}
             <div class="treatment-meta-grid">
                 <div class="meta-item">
                     <span class="meta-label">Monitoring Schedule</span>
@@ -884,12 +966,16 @@ function displayEWTreatmentTab(tabType) {
 
     elements.treatmentContentEW.innerHTML = `
         <div class="treatment-list-ew">
-            ${items.map((item, i) => `
-                <div class="treatment-item-ew">
-                    <span class="treatment-number">${i + 1}</span>
-                    <span class="treatment-text">${item}</span>
-                </div>
-            `).join('')}
+            ${items.map((item, i) => {
+                // Check if this is a fallback indicator item
+                const isFallbackItem = item.includes('FALLBACK') || item.includes('\u26a0\ufe0f FALLBACK');
+                return `
+                    <div class="treatment-item-ew ${isFallbackItem ? 'fallback-item' : ''}">
+                        <span class="treatment-number">${i + 1}</span>
+                        <span class="treatment-text">${item}</span>
+                    </div>
+                `;
+            }).join('')}
         </div>
     `;
 }
