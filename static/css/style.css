@@ -1502,6 +1502,83 @@ body {
     color: var(--color-info);
 }
 
+/* API Key Configuration */
+.api-key-config {
+    margin-top: var(--space-lg);
+    padding-top: var(--space-lg);
+    border-top: 1px solid var(--color-border);
+}
+
+.api-key-config h5 {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--color-text);
+    margin-bottom: var(--space-sm);
+}
+
+.api-key-hint {
+    font-size: 0.8rem;
+    color: var(--color-text-secondary);
+    margin-bottom: var(--space-md);
+}
+
+.api-key-inputs {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+}
+
+.api-key-input-group {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    flex-wrap: wrap;
+}
+
+.api-key-input-group label {
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--color-text-secondary);
+    min-width: 140px;
+}
+
+.api-key-input {
+    flex: 1;
+    min-width: 200px;
+    padding: var(--space-sm) var(--space-md);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    font-size: 0.85rem;
+    transition: border-color var(--transition-fast);
+}
+
+.api-key-input:focus {
+    outline: none;
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px var(--color-primary-light);
+}
+
+.api-key-link {
+    font-size: 0.8rem;
+    color: var(--color-secondary);
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+.api-key-link:hover {
+    text-decoration: underline;
+}
+
+/* Full Analysis Model Panel */
+.full-analysis-option {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    padding-bottom: var(--space-md);
+    border-bottom: 1px solid var(--color-border);
+    margin-bottom: var(--space-md);
+}
+
 /* ============================================
    Comparison Results
    ============================================ */

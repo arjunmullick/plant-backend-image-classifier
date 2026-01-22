@@ -31,6 +31,9 @@ class ExternalModelType(str, Enum):
     MOBILENET_V2 = "mobilenet_v2"
     VIT_CROP = "vit_crop"
     PLANTNET = "plantnet"
+    KINDWISE = "kindwise"
+    RESNET50_PLANT = "resnet50_plant"
+    EFFICIENTNET_PLANT = "efficientnet_plant"
 
 
 @dataclass
@@ -390,13 +393,25 @@ class PlantNetAPI(BaseExternalModel):
     Species: 50,000+ plant species
 
     Requires API key from https://my.plantnet.org/
+    Set via PLANT_CLASSIFIER_PLANTNET_API_KEY environment variable.
     """
 
     API_BASE_URL = "https://my-api.plantnet.org/v2/identify/all"
 
     def __init__(self, api_key: Optional[str] = None):
         super().__init__()
-        self.api_key = api_key or os.getenv("PLANTNET_API_KEY")
+        # Try multiple sources for API key
+        self.api_key = api_key or os.getenv("PLANTNET_API_KEY") or os.getenv("PLANT_CLASSIFIER_PLANTNET_API_KEY")
+
+        # Also try to get from settings if available
+        if not self.api_key:
+            try:
+                from app.core.config import get_settings
+                settings = get_settings()
+                self.api_key = settings.plantnet_api_key
+            except Exception:
+                pass
+
         if self.api_key:
             self.is_loaded = True
 
@@ -510,6 +525,357 @@ class PlantNetAPI(BaseExternalModel):
             return self._create_error_result(str(e), processing_time)
 
 
+class KindwiseAPI(BaseExternalModel):
+    """
+    Kindwise/Plant.id API Integration for plant identification.
+
+    API: https://www.kindwise.com/plant-id
+    Superior accuracy according to academic papers.
+
+    Requires API key from https://www.kindwise.com/
+    Set via PLANT_CLASSIFIER_KINDWISE_API_KEY environment variable.
+    """
+
+    API_BASE_URL = "https://plant.id/api/v3/identification"
+
+    def __init__(self, api_key: Optional[str] = None):
+        super().__init__()
+        self.api_key = api_key or os.getenv("KINDWISE_API_KEY") or os.getenv("PLANT_CLASSIFIER_KINDWISE_API_KEY")
+
+        if not self.api_key:
+            try:
+                from app.core.config import get_settings
+                settings = get_settings()
+                self.api_key = settings.kindwise_api_key
+            except Exception:
+                pass
+
+        if self.api_key:
+            self.is_loaded = True
+
+    @property
+    def model_name(self) -> str:
+        return "Plant.id (Kindwise)"
+
+    @property
+    def model_type(self) -> ExternalModelType:
+        return ExternalModelType.KINDWISE
+
+    async def predict(self, image: Image.Image) -> ExternalModelResult:
+        """Run prediction using Kindwise/Plant.id API."""
+        start_time = time.time()
+
+        if not self.api_key:
+            return self._create_error_result(
+                "Kindwise API key not configured. Set KINDWISE_API_KEY or PLANT_CLASSIFIER_KINDWISE_API_KEY environment variable.",
+                0
+            )
+
+        try:
+            # Convert image to base64
+            buffer = BytesIO()
+            image_rgb = image.convert("RGB")
+            image_rgb.save(buffer, format="JPEG", quality=85)
+            image_base64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
+
+            # Make API request
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                headers = {
+                    "Api-Key": self.api_key,
+                    "Content-Type": "application/json"
+                }
+                payload = {
+                    "images": [f"data:image/jpeg;base64,{image_base64}"],
+                    "similar_images": True,
+                    "health": "only"  # Include health assessment
+                }
+
+                response = await client.post(
+                    self.API_BASE_URL,
+                    json=payload,
+                    headers=headers
+                )
+
+                processing_time = (time.time() - start_time) * 1000
+
+                if response.status_code == 200 or response.status_code == 201:
+                    data = response.json()
+                    result = data.get("result", {})
+                    classification = result.get("classification", {})
+                    suggestions = classification.get("suggestions", [])
+
+                    if suggestions:
+                        top_result = suggestions[0]
+                        name = top_result.get("name", "Unknown")
+                        confidence = top_result.get("probability", 0)
+
+                        # Get health assessment if available
+                        health = result.get("is_healthy", {})
+                        is_healthy = health.get("binary", True)
+                        diseases = result.get("disease", {}).get("suggestions", [])
+
+                        disease_info = None
+                        if diseases:
+                            disease_info = diseases[0].get("name")
+
+                        return ExternalModelResult(
+                            model_name=self.model_name,
+                            model_type=self.model_type,
+                            prediction=disease_info if disease_info else ("Healthy" if is_healthy else name),
+                            confidence=confidence,
+                            raw_label=name,
+                            processing_time_ms=processing_time,
+                            additional_info={
+                                "scientific_name": top_result.get("details", {}).get("scientific_name"),
+                                "common_names": top_result.get("details", {}).get("common_names", [])[:3],
+                                "is_healthy": is_healthy,
+                                "disease": disease_info,
+                                "top_3": [
+                                    {
+                                        "label": s.get("name"),
+                                        "confidence": s.get("probability", 0)
+                                    }
+                                    for s in suggestions[:3]
+                                ]
+                            }
+                        )
+                    else:
+                        return self._create_error_result("No species identified", processing_time)
+
+                elif response.status_code == 401:
+                    return self._create_error_result("Invalid Kindwise API key", processing_time)
+                elif response.status_code == 429:
+                    return self._create_error_result("Kindwise API rate limit exceeded", processing_time)
+                else:
+                    return self._create_error_result(
+                        f"Kindwise API error: {response.status_code}",
+                        processing_time
+                    )
+
+        except httpx.TimeoutException:
+            processing_time = (time.time() - start_time) * 1000
+            return self._create_error_result("Kindwise API timeout", processing_time)
+        except Exception as e:
+            processing_time = (time.time() - start_time) * 1000
+            logger.error(f"Kindwise API error: {e}")
+            return self._create_error_result(str(e), processing_time)
+
+
+class ResNet50PlantDisease(BaseExternalModel):
+    """
+    ResNet50 Plant Disease Model from HuggingFace.
+
+    Model: Diginsa/Plant-Disease-Detection-Project
+    Architecture: ResNet50 fine-tuned on PlantVillage
+    """
+
+    MODEL_ID = "Diginsa/Plant-Disease-Detection-Project"
+
+    def __init__(self):
+        super().__init__()
+        self._pipeline = None
+
+    @property
+    def model_name(self) -> str:
+        return "ResNet50 Plant Disease (HF)"
+
+    @property
+    def model_type(self) -> ExternalModelType:
+        return ExternalModelType.RESNET50_PLANT
+
+    def _load_model(self):
+        """Lazy load the model pipeline."""
+        if self._pipeline is None:
+            try:
+                from transformers import pipeline
+                logger.info(f"Loading ResNet50 model: {self.MODEL_ID}")
+                self._pipeline = pipeline(
+                    "image-classification",
+                    model=self.MODEL_ID,
+                    device=-1  # CPU
+                )
+                self.is_loaded = True
+                logger.info("ResNet50 model loaded successfully")
+            except Exception as e:
+                self.load_error = str(e)
+                logger.error(f"Failed to load ResNet50 model: {e}")
+                raise
+
+    def _parse_label(self, raw_label: str) -> str:
+        """Parse raw label to user-friendly format."""
+        if "___" in raw_label:
+            parts = raw_label.split("___")
+            if len(parts) == 2:
+                disease = parts[1].replace("_", " ")
+                return disease
+        return raw_label.replace("_", " ")
+
+    def _extract_crop(self, raw_label: str) -> Optional[str]:
+        """Extract crop name from label."""
+        if "___" in raw_label:
+            crop = raw_label.split("___")[0]
+            return crop.replace("_", " ").replace("(maize)", "").strip()
+        return None
+
+    async def predict(self, image: Image.Image) -> ExternalModelResult:
+        """Run prediction using ResNet50."""
+        start_time = time.time()
+
+        try:
+            self._load_model()
+
+            loop = asyncio.get_event_loop()
+            results = await loop.run_in_executor(
+                None,
+                lambda: self._pipeline(image, top_k=3)
+            )
+
+            processing_time = (time.time() - start_time) * 1000
+
+            if results and len(results) > 0:
+                top_result = results[0]
+                raw_label = top_result["label"]
+                confidence = top_result["score"]
+
+                return ExternalModelResult(
+                    model_name=self.model_name,
+                    model_type=self.model_type,
+                    prediction=self._parse_label(raw_label),
+                    confidence=confidence,
+                    raw_label=raw_label,
+                    processing_time_ms=processing_time,
+                    additional_info={
+                        "crop": self._extract_crop(raw_label),
+                        "top_3": [
+                            {
+                                "label": r["label"],
+                                "disease": self._parse_label(r["label"]),
+                                "confidence": r["score"]
+                            }
+                            for r in results[:3]
+                        ]
+                    }
+                )
+            else:
+                return self._create_error_result("No predictions returned", processing_time)
+
+        except ImportError as e:
+            processing_time = (time.time() - start_time) * 1000
+            return self._create_error_result(f"transformers library not installed: {e}", processing_time)
+        except Exception as e:
+            processing_time = (time.time() - start_time) * 1000
+            logger.error(f"ResNet50 prediction error: {e}")
+            return self._create_error_result(str(e), processing_time)
+
+
+class EfficientNetPlantDisease(BaseExternalModel):
+    """
+    EfficientNet Plant Disease Model from HuggingFace.
+
+    Model: ozair23/mobilenet_v2_1.0_224-finetuned-plantdisease
+    Architecture: MobileNetV2/EfficientNet style for plant disease
+    High accuracy on PlantVillage dataset
+    """
+
+    MODEL_ID = "ozair23/mobilenet_v2_1.0_224-finetuned-plantdisease"
+
+    def __init__(self):
+        super().__init__()
+        self._pipeline = None
+
+    @property
+    def model_name(self) -> str:
+        return "EfficientNet Plant Disease (HF)"
+
+    @property
+    def model_type(self) -> ExternalModelType:
+        return ExternalModelType.EFFICIENTNET_PLANT
+
+    def _load_model(self):
+        """Lazy load the model pipeline."""
+        if self._pipeline is None:
+            try:
+                from transformers import pipeline
+                logger.info(f"Loading EfficientNet model: {self.MODEL_ID}")
+                self._pipeline = pipeline(
+                    "image-classification",
+                    model=self.MODEL_ID,
+                    device=-1  # CPU
+                )
+                self.is_loaded = True
+                logger.info("EfficientNet model loaded successfully")
+            except Exception as e:
+                self.load_error = str(e)
+                logger.error(f"Failed to load EfficientNet model: {e}")
+                raise
+
+    def _parse_label(self, raw_label: str) -> str:
+        """Parse raw label to user-friendly format."""
+        if "___" in raw_label:
+            parts = raw_label.split("___")
+            if len(parts) == 2:
+                disease = parts[1].replace("_", " ")
+                return disease
+        return raw_label.replace("_", " ")
+
+    def _extract_crop(self, raw_label: str) -> Optional[str]:
+        """Extract crop name from label."""
+        if "___" in raw_label:
+            crop = raw_label.split("___")[0]
+            return crop.replace("_", " ").replace("(maize)", "").strip()
+        return None
+
+    async def predict(self, image: Image.Image) -> ExternalModelResult:
+        """Run prediction using EfficientNet."""
+        start_time = time.time()
+
+        try:
+            self._load_model()
+
+            loop = asyncio.get_event_loop()
+            results = await loop.run_in_executor(
+                None,
+                lambda: self._pipeline(image, top_k=3)
+            )
+
+            processing_time = (time.time() - start_time) * 1000
+
+            if results and len(results) > 0:
+                top_result = results[0]
+                raw_label = top_result["label"]
+                confidence = top_result["score"]
+
+                return ExternalModelResult(
+                    model_name=self.model_name,
+                    model_type=self.model_type,
+                    prediction=self._parse_label(raw_label),
+                    confidence=confidence,
+                    raw_label=raw_label,
+                    processing_time_ms=processing_time,
+                    additional_info={
+                        "crop": self._extract_crop(raw_label),
+                        "top_3": [
+                            {
+                                "label": r["label"],
+                                "disease": self._parse_label(r["label"]),
+                                "confidence": r["score"]
+                            }
+                            for r in results[:3]
+                        ]
+                    }
+                )
+            else:
+                return self._create_error_result("No predictions returned", processing_time)
+
+        except ImportError as e:
+            processing_time = (time.time() - start_time) * 1000
+            return self._create_error_result(f"transformers library not installed: {e}", processing_time)
+        except Exception as e:
+            processing_time = (time.time() - start_time) * 1000
+            logger.error(f"EfficientNet prediction error: {e}")
+            return self._create_error_result(str(e), processing_time)
+
+
 class ExternalModelRegistry:
     """
     Registry for external models.
@@ -533,6 +899,9 @@ class ExternalModelRegistry:
                 ExternalModelType.MOBILENET_V2: MobileNetV2PlantDisease(),
                 ExternalModelType.VIT_CROP: ViTCropDiseases(),
                 ExternalModelType.PLANTNET: PlantNetAPI(),
+                ExternalModelType.KINDWISE: KindwiseAPI(),
+                ExternalModelType.RESNET50_PLANT: ResNet50PlantDisease(),
+                ExternalModelType.EFFICIENTNET_PLANT: EfficientNetPlantDisease(),
             }
             self._initialized = True
 

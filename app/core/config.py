@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     llm_provider: Optional[str] = None  # "openai", "anthropic", etc.
     llm_api_key: Optional[str] = None
 
+    # External API Keys for model comparison
+    plantnet_api_key: Optional[str] = None  # Pl@ntNet API key from https://my.plantnet.org/
+    kindwise_api_key: Optional[str] = None  # Plant.id/Kindwise API key from https://www.kindwise.com/
+
     # Logging
     log_level: str = "INFO"
 

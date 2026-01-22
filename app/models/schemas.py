@@ -329,11 +329,19 @@ class ComparisonRequest(BaseModel):
     )
     models: list[str] = Field(
         default=["internal", "mobilenet_v2", "vit_crop"],
-        description="Models to compare: internal, mobilenet_v2, vit_crop, plantnet"
+        description="Models to compare: internal, mobilenet_v2, vit_crop, plantnet, kindwise, resnet50_plant, efficientnet_plant"
     )
     include_confidence: bool = Field(
         default=True,
         description="Include confidence scores in comparison"
+    )
+    plantnet_api_key: Optional[str] = Field(
+        default=None,
+        description="PlantNet API key (optional, overrides environment variable)"
+    )
+    kindwise_api_key: Optional[str] = Field(
+        default=None,
+        description="Kindwise/Plant.id API key (optional, overrides environment variable)"
     )
 
     @field_validator("image")

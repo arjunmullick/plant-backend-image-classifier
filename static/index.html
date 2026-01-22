@@ -110,6 +110,19 @@
 
             <!-- Options -->
             <div class="options-panel" id="optionsPanel">
+                <!-- Model Selection for Full Analysis Mode -->
+                <div class="option-group full-analysis-option" id="fullAnalysisModelPanel">
+                    <label class="option-label-inline">Analysis Model:</label>
+                    <select id="analysisModelSelect" class="select-input">
+                        <option value="internal">Internal Model (Default)</option>
+                        <option value="mobilenet_v2">MobileNetV2 (HuggingFace)</option>
+                        <option value="vit_crop">ViT Crop Diseases (HuggingFace)</option>
+                        <option value="resnet50_plant">ResNet50 (HuggingFace)</option>
+                        <option value="efficientnet_plant">EfficientNet (HuggingFace)</option>
+                        <option value="plantnet">Pl@ntNet API (External)</option>
+                        <option value="kindwise">Plant.id/Kindwise API (External)</option>
+                    </select>
+                </div>
                 <div class="option-group">
                     <label class="option-label">
                         <input type="checkbox" id="includeTreatment" checked>
@@ -186,14 +199,62 @@
                         </label>
 
                         <label class="model-checkbox">
+                            <input type="checkbox" id="modelResNet50" value="resnet50_plant">
+                            <span class="checkbox-custom"></span>
+                            <div class="model-info">
+                                <span class="model-name">ResNet50 Plant Disease (HuggingFace)</span>
+                                <span class="model-desc">Deep ResNet architecture, PlantVillage trained</span>
+                                <span class="model-badge hf">HuggingFace</span>
+                            </div>
+                        </label>
+
+                        <label class="model-checkbox">
+                            <input type="checkbox" id="modelEfficientNet" value="efficientnet_plant">
+                            <span class="checkbox-custom"></span>
+                            <div class="model-info">
+                                <span class="model-name">EfficientNet Plant Disease (HuggingFace)</span>
+                                <span class="model-desc">Efficient architecture with high accuracy</span>
+                                <span class="model-badge hf">HuggingFace</span>
+                            </div>
+                        </label>
+
+                        <label class="model-checkbox">
                             <input type="checkbox" id="modelPlantNet" value="plantnet">
                             <span class="checkbox-custom"></span>
                             <div class="model-info">
                                 <span class="model-name">Pl@ntNet API</span>
-                                <span class="model-desc">50,000+ species (requires PLANTNET_API_KEY)</span>
+                                <span class="model-desc">50,000+ species identification</span>
                                 <span class="model-badge api">External API</span>
                             </div>
                         </label>
+
+                        <label class="model-checkbox">
+                            <input type="checkbox" id="modelKindwise" value="kindwise">
+                            <span class="checkbox-custom"></span>
+                            <div class="model-info">
+                                <span class="model-name">Plant.id / Kindwise API</span>
+                                <span class="model-desc">Superior accuracy, health assessment included</span>
+                                <span class="model-badge api">External API</span>
+                            </div>
+                        </label>
+                    </div>
+
+                    <!-- API Key Configuration -->
+                    <div class="api-key-config">
+                        <h5>API Key Configuration</h5>
+                        <p class="api-key-hint">External APIs require API keys. Configure them here or via environment variables.</p>
+                        <div class="api-key-inputs">
+                            <div class="api-key-input-group">
+                                <label for="plantnetApiKey">PlantNet API Key:</label>
+                                <input type="password" id="plantnetApiKey" placeholder="Enter PlantNet API key" class="api-key-input">
+                                <a href="https://my.plantnet.org/" target="_blank" class="api-key-link">Get key</a>
+                            </div>
+                            <div class="api-key-input-group">
+                                <label for="kindwiseApiKey">Kindwise API Key:</label>
+                                <input type="password" id="kindwiseApiKey" placeholder="Enter Kindwise API key" class="api-key-input">
+                                <a href="https://www.kindwise.com/" target="_blank" class="api-key-link">Get key</a>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>

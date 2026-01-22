@@ -397,7 +397,10 @@ async def get_supported_diseases(
     - `internal`: Our trained model with full pipeline
     - `mobilenet_v2`: MobileNetV2 Plant Disease (HuggingFace) - 38 classes, ~95% accuracy
     - `vit_crop`: ViT Crop Diseases (HuggingFace) - 14 classes, ~98% accuracy
-    - `plantnet`: Pl@ntNet API - 50,000+ species (requires API key)
+    - `plantnet`: Pl@ntNet API - 50,000+ species (requires PLANTNET_API_KEY)
+    - `kindwise`: Plant.id/Kindwise API - Superior accuracy (requires KINDWISE_API_KEY)
+    - `resnet50_plant`: ResNet50 Plant Disease (HuggingFace) - PlantVillage trained
+    - `efficientnet_plant`: EfficientNet Plant Disease (HuggingFace) - High accuracy model
 
     **Use Cases:**
     - Validate predictions across multiple models
@@ -463,6 +466,9 @@ async def compare_models(
             "mobilenet_v2": ExternalModelType.MOBILENET_V2,
             "vit_crop": ExternalModelType.VIT_CROP,
             "plantnet": ExternalModelType.PLANTNET,
+            "kindwise": ExternalModelType.KINDWISE,
+            "resnet50_plant": ExternalModelType.RESNET50_PLANT,
+            "efficientnet_plant": ExternalModelType.EFFICIENTNET_PLANT,
         }
 
         # Run external models
@@ -472,6 +478,19 @@ async def compare_models(
             for m in request.models
             if m in model_type_map
         ]
+
+        # Override API keys if provided in request
+        if request.plantnet_api_key:
+            plantnet_model = registry.get_model(ExternalModelType.PLANTNET)
+            if plantnet_model:
+                plantnet_model.api_key = request.plantnet_api_key
+                plantnet_model.is_loaded = True
+
+        if request.kindwise_api_key:
+            kindwise_model = registry.get_model(ExternalModelType.KINDWISE)
+            if kindwise_model:
+                kindwise_model.api_key = request.kindwise_api_key
+                kindwise_model.is_loaded = True
 
         if external_model_types:
             comparison_results = await registry.run_comparison(

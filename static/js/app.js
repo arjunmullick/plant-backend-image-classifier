@@ -25,6 +25,11 @@ const state = {
     currentTreatmentTab: 'organic',
     treatmentData: null,
     selectedModels: ['internal', 'mobilenet_v2'],  // Default selected models for comparison
+    selectedAnalysisModel: 'internal',  // Selected model for full analysis
+    apiKeys: {
+        plantnet: null,
+        kindwise: null
+    }
 };
 
 // ============================================
@@ -75,6 +80,17 @@ const elements = {
     modelMobileNet: document.getElementById('modelMobileNet'),
     modelViT: document.getElementById('modelViT'),
     modelPlantNet: document.getElementById('modelPlantNet'),
+    modelResNet50: document.getElementById('modelResNet50'),
+    modelEfficientNet: document.getElementById('modelEfficientNet'),
+    modelKindwise: document.getElementById('modelKindwise'),
+
+    // Analysis Model (Full Analysis Mode)
+    fullAnalysisModelPanel: document.getElementById('fullAnalysisModelPanel'),
+    analysisModelSelect: document.getElementById('analysisModelSelect'),
+
+    // API Key inputs
+    plantnetApiKey: document.getElementById('plantnetApiKey'),
+    kindwiseApiKey: document.getElementById('kindwiseApiKey'),
 
     // Comparison Results
     comparisonResults: document.getElementById('comparisonResults'),
@@ -95,11 +111,54 @@ document.addEventListener('DOMContentLoaded', () => {
     initUpload();
     initOptions();
     initTreatmentTabs();
+    initApiKeyInputs();
     checkAPIHealth();
 
     // Retry button
     elements.retryBtn?.addEventListener('click', handleAnalyze);
 });
+
+// ============================================
+// API Key Management
+// ============================================
+function initApiKeyInputs() {
+    // Load saved API keys from localStorage
+    const savedPlantnetKey = localStorage.getItem('plantnet_api_key');
+    const savedKindwiseKey = localStorage.getItem('kindwise_api_key');
+
+    if (savedPlantnetKey && elements.plantnetApiKey) {
+        elements.plantnetApiKey.value = savedPlantnetKey;
+        state.apiKeys.plantnet = savedPlantnetKey;
+    }
+    if (savedKindwiseKey && elements.kindwiseApiKey) {
+        elements.kindwiseApiKey.value = savedKindwiseKey;
+        state.apiKeys.kindwise = savedKindwiseKey;
+    }
+
+    // Save API keys on change
+    elements.plantnetApiKey?.addEventListener('change', (e) => {
+        state.apiKeys.plantnet = e.target.value;
+        if (e.target.value) {
+            localStorage.setItem('plantnet_api_key', e.target.value);
+        } else {
+            localStorage.removeItem('plantnet_api_key');
+        }
+    });
+
+    elements.kindwiseApiKey?.addEventListener('change', (e) => {
+        state.apiKeys.kindwise = e.target.value;
+        if (e.target.value) {
+            localStorage.setItem('kindwise_api_key', e.target.value);
+        } else {
+            localStorage.removeItem('kindwise_api_key');
+        }
+    });
+
+    // Analysis model selection
+    elements.analysisModelSelect?.addEventListener('change', (e) => {
+        state.selectedAnalysisModel = e.target.value;
+    });
+}
 
 // ============================================
 // Tab Management
@@ -133,6 +192,11 @@ function setMode(mode) {
         console.log('modelSelectionPanel display:', elements.modelSelectionPanel.style.display);
     } else {
         console.warn('modelSelectionPanel element not found!');
+    }
+
+    // Show/hide full analysis model panel
+    if (elements.fullAnalysisModelPanel) {
+        elements.fullAnalysisModelPanel.style.display = (mode === 'full' || mode === 'species' || mode === 'disease') ? 'flex' : 'none';
     }
 
     // Update file input for batch mode
@@ -314,6 +378,7 @@ async function handleAnalyze() {
     try {
         const options = getOptions();
         let result;
+        const selectedModel = state.selectedAnalysisModel || 'internal';
 
         if (state.mode === 'batch') {
             result = await classifyBatch(state.selectedFiles, options);
@@ -331,6 +396,12 @@ async function handleAnalyze() {
             result = await classifyCompare(file, selectedModels);
             console.log('Compare API result:', result);
             displayComparisonResults(result);
+        } else if (selectedModel !== 'internal' && (state.mode === 'full' || state.mode === 'species' || state.mode === 'disease')) {
+            // Use comparison endpoint with single model when non-internal model selected
+            const file = state.selectedFiles[0];
+            console.log('Using selected model:', selectedModel);
+            result = await classifyCompare(file, [selectedModel]);
+            displaySingleModelResult(result, selectedModel);
         } else {
             const file = state.selectedFiles[0];
 
@@ -466,7 +537,10 @@ function getSelectedModels() {
     if (elements.modelInternal?.checked) models.push('internal');
     if (elements.modelMobileNet?.checked) models.push('mobilenet_v2');
     if (elements.modelViT?.checked) models.push('vit_crop');
+    if (elements.modelResNet50?.checked) models.push('resnet50_plant');
+    if (elements.modelEfficientNet?.checked) models.push('efficientnet_plant');
     if (elements.modelPlantNet?.checked) models.push('plantnet');
+    if (elements.modelKindwise?.checked) models.push('kindwise');
     console.log('getSelectedModels:', models);
     return models;
 }
@@ -474,13 +548,24 @@ function getSelectedModels() {
 async function classifyCompare(file, models) {
     const base64 = await fileToBase64(file);
 
+    // Build request with API keys if provided
+    const requestBody = {
+        image: base64,
+        models: models,
+    };
+
+    // Include API keys if provided
+    if (state.apiKeys.plantnet) {
+        requestBody.plantnet_api_key = state.apiKeys.plantnet;
+    }
+    if (state.apiKeys.kindwise) {
+        requestBody.kindwise_api_key = state.apiKeys.kindwise;
+    }
+
     const response = await fetch(`${API_BASE}/classify/compare`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            image: base64,
-            models: models,
-        }),
+        body: JSON.stringify(requestBody),
     });
 
     if (!response.ok) {
@@ -489,6 +574,66 @@ async function classifyCompare(file, models) {
     }
 
     return response.json();
+}
+
+function displaySingleModelResult(data, modelKey) {
+    console.log('displaySingleModelResult called with:', data, modelKey);
+
+    // Get the external model result
+    const modelResult = data.external_models?.[modelKey];
+
+    if (!modelResult) {
+        showError('No result from selected model');
+        return;
+    }
+
+    if (modelResult.error) {
+        showError(modelResult.error);
+        return;
+    }
+
+    // Hide other result containers
+    if (elements.batchResults) elements.batchResults.style.display = 'none';
+    if (elements.comparisonResults) elements.comparisonResults.style.display = 'none';
+    if (elements.errorContainer) elements.errorContainer.style.display = 'none';
+
+    // Show single result
+    elements.singleResult.style.display = 'grid';
+
+    // Hide treatment and explainability cards (not available for external models)
+    document.getElementById('treatmentCard').style.display = 'none';
+    document.getElementById('explainCard').style.display = 'none';
+
+    // Meta info
+    if (data.metadata) {
+        elements.resultsMeta.innerHTML = `
+            Model: ${modelResult.model_name} | Processed in ${modelResult.processing_time_ms?.toFixed(0) || '?'}ms
+        `;
+    }
+
+    // Display plant identification (from additional_info if available)
+    const additionalInfo = modelResult.additional_info || {};
+    const plantData = {
+        family: { name: additionalInfo.family || 'Unknown', confidence: modelResult.confidence || 0 },
+        genus: { name: additionalInfo.genus || 'Unknown', confidence: modelResult.confidence || 0 },
+        species: { name: modelResult.raw_label || modelResult.prediction || 'Unknown', confidence: modelResult.confidence || 0 },
+        common_name: additionalInfo.common_names?.[0] || modelResult.prediction,
+        alternative_species: additionalInfo.top_3?.slice(1).map(t => ({
+            name: t.disease || t.label || t.species || 'Unknown',
+            confidence: t.confidence
+        }))
+    };
+    displayPlantIdentification(plantData);
+
+    // Display health assessment
+    const isHealthy = (modelResult.prediction || '').toLowerCase() === 'healthy';
+    const healthData = {
+        status: isHealthy ? 'Healthy' : 'Diseased',
+        disease: isHealthy ? null : modelResult.prediction,
+        confidence: modelResult.confidence || 0,
+        visual_symptoms: []
+    };
+    displayHealthAssessment(healthData);
 }
 
 function displayComparisonResults(data) {
