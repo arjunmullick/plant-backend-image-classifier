@@ -638,3 +638,185 @@ def _generate_recommendation(
         return "Moderate confidence - some agreement between models. Consider expert verification for critical decisions."
     else:
         return "Low agreement between models - recommend expert verification before taking action"
+
+
+# === Early Warning System Endpoints ===
+
+class EarlyWarningRequest(BaseModel):
+    """Request for early warning disease analysis."""
+    image: str  # Base64-encoded image
+    region: Optional[str] = None
+    plantnet_api_key: Optional[str] = None
+    kindwise_api_key: Optional[str] = None
+
+
+class ModelPredictionResponse(BaseModel):
+    """Individual model prediction in early warning response."""
+    model_name: str
+    model_type: str
+    prediction: Optional[str]
+    confidence: float
+    raw_label: Optional[str]
+    processing_time_ms: float
+    explanation: str
+    contributing_factors: list[str]
+    error: Optional[str] = None
+
+
+class ConsensusResponse(BaseModel):
+    """Disease consensus in early warning response."""
+    disease_name: str
+    confidence: float
+    model_agreement: float
+    supporting_models: list[str]
+    dissenting_models: list[str]
+    is_healthy: bool
+    reasoning: str
+
+
+class SeverityResponse(BaseModel):
+    """Severity assessment in early warning response."""
+    level: str
+    score: float
+    factors: list[str]
+    urgency: str
+    action_timeline: str
+
+
+class TreatmentResponse(BaseModel):
+    """Treatment recommendations in early warning response."""
+    immediate_actions: list[str]
+    organic_treatments: list[str]
+    chemical_treatments: list[str]
+    prevention_measures: list[str]
+    monitoring_schedule: str
+    estimated_recovery: str
+    regional_notes: Optional[str] = None
+    weather_considerations: Optional[str] = None
+
+
+class EarlyWarningResponse(BaseModel):
+    """Complete early warning system response."""
+    model_predictions: list[ModelPredictionResponse]
+    consensus: ConsensusResponse
+    severity: SeverityResponse
+    treatment: TreatmentResponse
+    metadata: dict
+
+
+@router.post(
+    "/early-warning",
+    response_model=EarlyWarningResponse,
+    summary="AI Crop Disease Early Warning System",
+    description="""
+    Comprehensive disease analysis using ALL available models in parallel.
+
+    **Features:**
+    - Runs all models simultaneously for maximum accuracy
+    - Aggregates results with confidence-weighted voting
+    - Provides detailed explanation of each model's reasoning
+    - Calculates disease severity score
+    - Generates localized treatment recommendations
+
+    **Severity Levels:**
+    - CRITICAL (80-100): Immediate action required
+    - HIGH (60-79): Action needed within 3-5 days
+    - MODERATE (40-59): Address within 1-2 weeks
+    - LOW (1-39): Monitor and treat preventively
+    - HEALTHY (0): No disease detected
+
+    **Regional Support:**
+    - US-CA, US-FL, US-TX (United States)
+    - EU (European Union)
+    - IN-MH, IN-KA (India)
+    - AU (Australia)
+    """
+)
+async def early_warning_analysis(
+    request: EarlyWarningRequest
+) -> EarlyWarningResponse:
+    """
+    Run comprehensive early warning disease analysis.
+
+    This endpoint runs ALL available models in parallel and provides:
+    - Individual predictions with explanations
+    - Consensus disease identification
+    - Severity scoring
+    - Localized treatment recommendations
+    """
+    import base64
+    from io import BytesIO
+    from PIL import Image
+
+    from app.services.early_warning_service import get_early_warning_service
+
+    try:
+        # Decode image
+        image_data = request.image
+        if "," in image_data:
+            image_data = image_data.split(",", 1)[1]
+
+        image_bytes = base64.b64decode(image_data)
+        pil_image = Image.open(BytesIO(image_bytes)).convert("RGB")
+
+        # Get service and run analysis
+        service = get_early_warning_service()
+        result = await service.analyze(
+            image=pil_image,
+            region=request.region,
+            include_internal=True,
+            plantnet_api_key=request.plantnet_api_key,
+            kindwise_api_key=request.kindwise_api_key
+        )
+
+        # Convert to response format
+        return EarlyWarningResponse(
+            model_predictions=[
+                ModelPredictionResponse(
+                    model_name=p.model_name,
+                    model_type=p.model_type,
+                    prediction=p.prediction,
+                    confidence=p.confidence,
+                    raw_label=p.raw_label,
+                    processing_time_ms=p.processing_time_ms,
+                    explanation=p.explanation,
+                    contributing_factors=p.contributing_factors,
+                    error=p.error
+                )
+                for p in result.model_predictions
+            ],
+            consensus=ConsensusResponse(
+                disease_name=result.consensus.disease_name,
+                confidence=result.consensus.confidence,
+                model_agreement=result.consensus.model_agreement,
+                supporting_models=result.consensus.supporting_models,
+                dissenting_models=result.consensus.dissenting_models,
+                is_healthy=result.consensus.is_healthy,
+                reasoning=result.consensus.reasoning
+            ),
+            severity=SeverityResponse(
+                level=result.severity.level.value,
+                score=result.severity.score,
+                factors=result.severity.factors,
+                urgency=result.severity.urgency,
+                action_timeline=result.severity.action_timeline
+            ),
+            treatment=TreatmentResponse(
+                immediate_actions=result.treatment.immediate_actions,
+                organic_treatments=result.treatment.organic_treatments,
+                chemical_treatments=result.treatment.chemical_treatments,
+                prevention_measures=result.treatment.prevention_measures,
+                monitoring_schedule=result.treatment.monitoring_schedule,
+                estimated_recovery=result.treatment.estimated_recovery,
+                regional_notes=result.treatment.regional_notes,
+                weather_considerations=result.treatment.weather_considerations
+            ),
+            metadata=result.metadata
+        )
+
+    except ValueError as e:
+        logger.warning(f"Early warning validation error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.exception(f"Early warning analysis failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")

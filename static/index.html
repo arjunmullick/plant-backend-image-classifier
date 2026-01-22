@@ -73,6 +73,14 @@
                     </svg>
                     Compare Models
                 </button>
+                <button class="tab" data-mode="early-warning">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                        <line x1="12" y1="9" x2="12" y2="13"/>
+                        <line x1="12" y1="17" x2="12.01" y2="17"/>
+                    </svg>
+                    Early Warning
+                </button>
             </div>
         </div>
 
@@ -257,6 +265,42 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- Early Warning Mode Options -->
+                <div class="option-group early-warning-option" id="earlyWarningPanel" style="display: none;">
+                    <div class="early-warning-intro">
+                        <h4>
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                                <line x1="12" y1="9" x2="12" y2="13"/>
+                                <line x1="12" y1="17" x2="12.01" y2="17"/>
+                            </svg>
+                            AI Crop Disease Early Warning System
+                        </h4>
+                        <p>This mode runs ALL available models in parallel to provide:</p>
+                        <ul>
+                            <li>Comprehensive disease identification with model consensus</li>
+                            <li>Severity scoring with urgency assessment</li>
+                            <li>Detailed explanation of each model's analysis</li>
+                            <li>Localized treatment recommendations</li>
+                        </ul>
+                    </div>
+                    <div class="api-key-config">
+                        <h5>API Keys (Optional - Enables More Models)</h5>
+                        <div class="api-key-inputs">
+                            <div class="api-key-input-group">
+                                <label for="ewPlantnetApiKey">PlantNet:</label>
+                                <input type="password" id="ewPlantnetApiKey" placeholder="PlantNet API key" class="api-key-input">
+                                <a href="https://my.plantnet.org/" target="_blank" class="api-key-link">Get key</a>
+                            </div>
+                            <div class="api-key-input-group">
+                                <label for="ewKindwiseApiKey">Kindwise:</label>
+                                <input type="password" id="ewKindwiseApiKey" placeholder="Kindwise API key" class="api-key-input">
+                                <a href="https://www.kindwise.com/" target="_blank" class="api-key-link">Get key</a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- Analyze Button -->
@@ -392,6 +436,95 @@
                 </div>
 
                 <div class="comparison-meta" id="comparisonMeta"></div>
+            </div>
+
+            <!-- Early Warning Results -->
+            <div class="early-warning-results" id="earlyWarningResults" style="display: none;">
+                <!-- Severity Banner -->
+                <div class="severity-banner" id="severityBanner">
+                    <div class="severity-indicator" id="severityIndicator">
+                        <div class="severity-score" id="severityScore">0</div>
+                        <div class="severity-label" id="severityLabel">Analyzing...</div>
+                    </div>
+                    <div class="severity-info">
+                        <h3 id="severityUrgency">Calculating severity...</h3>
+                        <p id="severityTimeline">Please wait for analysis</p>
+                    </div>
+                </div>
+
+                <!-- Consensus Section -->
+                <div class="ew-section consensus-section">
+                    <h3>
+                        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                            <polyline points="22 4 12 14.01 9 11.01"/>
+                        </svg>
+                        Disease Identification
+                    </h3>
+                    <div class="consensus-content" id="consensusContent">
+                        <!-- Consensus details inserted here -->
+                    </div>
+                </div>
+
+                <!-- Model Predictions Section -->
+                <div class="ew-section models-section">
+                    <h3>
+                        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="3" y="3" width="7" height="7"/>
+                            <rect x="14" y="3" width="7" height="7"/>
+                            <rect x="14" y="14" width="7" height="7"/>
+                            <rect x="3" y="14" width="7" height="7"/>
+                        </svg>
+                        Model Analysis Breakdown
+                    </h3>
+                    <p class="section-hint">Each model's prediction with detailed explanation</p>
+                    <div class="model-predictions-grid" id="modelPredictionsGrid">
+                        <!-- Model prediction cards inserted here -->
+                    </div>
+                </div>
+
+                <!-- Treatment Section -->
+                <div class="ew-section treatment-section">
+                    <h3>
+                        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/>
+                        </svg>
+                        Treatment Recommendations
+                    </h3>
+
+                    <div class="treatment-tabs-ew">
+                        <button class="treatment-tab-ew active" data-treatment-ew="immediate">Immediate Actions</button>
+                        <button class="treatment-tab-ew" data-treatment-ew="organic">Organic</button>
+                        <button class="treatment-tab-ew" data-treatment-ew="chemical">Chemical</button>
+                        <button class="treatment-tab-ew" data-treatment-ew="prevention">Prevention</button>
+                    </div>
+
+                    <div class="treatment-content-ew" id="treatmentContentEW">
+                        <!-- Treatment content inserted here -->
+                    </div>
+
+                    <div class="treatment-meta-ew" id="treatmentMetaEW">
+                        <!-- Recovery estimate, monitoring schedule -->
+                    </div>
+                </div>
+
+                <!-- Severity Factors Section -->
+                <div class="ew-section factors-section">
+                    <h3>
+                        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/>
+                            <line x1="12" y1="16" x2="12" y2="12"/>
+                            <line x1="12" y1="8" x2="12.01" y2="8"/>
+                        </svg>
+                        Severity Analysis Factors
+                    </h3>
+                    <div class="factors-list" id="factorsList">
+                        <!-- Severity factors inserted here -->
+                    </div>
+                </div>
+
+                <!-- Processing Meta -->
+                <div class="ew-meta" id="ewMeta"></div>
             </div>
         </div>
 

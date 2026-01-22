@@ -92,6 +92,26 @@ const elements = {
     plantnetApiKey: document.getElementById('plantnetApiKey'),
     kindwiseApiKey: document.getElementById('kindwiseApiKey'),
 
+    // Early Warning Mode
+    earlyWarningPanel: document.getElementById('earlyWarningPanel'),
+    ewPlantnetApiKey: document.getElementById('ewPlantnetApiKey'),
+    ewKindwiseApiKey: document.getElementById('ewKindwiseApiKey'),
+
+    // Early Warning Results
+    earlyWarningResults: document.getElementById('earlyWarningResults'),
+    severityBanner: document.getElementById('severityBanner'),
+    severityIndicator: document.getElementById('severityIndicator'),
+    severityScore: document.getElementById('severityScore'),
+    severityLabel: document.getElementById('severityLabel'),
+    severityUrgency: document.getElementById('severityUrgency'),
+    severityTimeline: document.getElementById('severityTimeline'),
+    consensusContent: document.getElementById('consensusContent'),
+    modelPredictionsGrid: document.getElementById('modelPredictionsGrid'),
+    treatmentContentEW: document.getElementById('treatmentContentEW'),
+    treatmentMetaEW: document.getElementById('treatmentMetaEW'),
+    factorsList: document.getElementById('factorsList'),
+    ewMeta: document.getElementById('ewMeta'),
+
     // Comparison Results
     comparisonResults: document.getElementById('comparisonResults'),
     agreementScore: document.getElementById('agreementScore'),
@@ -197,6 +217,11 @@ function setMode(mode) {
     // Show/hide full analysis model panel
     if (elements.fullAnalysisModelPanel) {
         elements.fullAnalysisModelPanel.style.display = (mode === 'full' || mode === 'species' || mode === 'disease') ? 'flex' : 'none';
+    }
+
+    // Show/hide early warning panel
+    if (elements.earlyWarningPanel) {
+        elements.earlyWarningPanel.style.display = mode === 'early-warning' ? 'block' : 'none';
     }
 
     // Update file input for batch mode
@@ -383,6 +408,11 @@ async function handleAnalyze() {
         if (state.mode === 'batch') {
             result = await classifyBatch(state.selectedFiles, options);
             displayBatchResults(result);
+        } else if (state.mode === 'early-warning') {
+            console.log('Early Warning mode - starting comprehensive analysis');
+            const file = state.selectedFiles[0];
+            result = await runEarlyWarningAnalysis(file, options);
+            displayEarlyWarningResults(result);
         } else if (state.mode === 'compare') {
             console.log('Compare mode - starting comparison');
             const file = state.selectedFiles[0];
@@ -574,6 +604,309 @@ async function classifyCompare(file, models) {
     }
 
     return response.json();
+}
+
+// ============================================
+// Early Warning System Functions
+// ============================================
+async function runEarlyWarningAnalysis(file, options) {
+    const base64 = await fileToBase64(file);
+
+    // Get API keys from early warning inputs or fallback to compare mode inputs
+    const plantnetKey = elements.ewPlantnetApiKey?.value || state.apiKeys.plantnet;
+    const kindwiseKey = elements.ewKindwiseApiKey?.value || state.apiKeys.kindwise;
+
+    const requestBody = {
+        image: base64,
+        region: options.region,
+    };
+
+    if (plantnetKey) {
+        requestBody.plantnet_api_key = plantnetKey;
+    }
+    if (kindwiseKey) {
+        requestBody.kindwise_api_key = kindwiseKey;
+    }
+
+    const response = await fetch(`${API_BASE}/classify/early-warning`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+    });
+
+    if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.detail || error.message || `Server error: ${response.status}`);
+    }
+
+    return response.json();
+}
+
+function displayEarlyWarningResults(data) {
+    console.log('displayEarlyWarningResults:', data);
+
+    // Hide other result containers
+    if (elements.singleResult) elements.singleResult.style.display = 'none';
+    if (elements.batchResults) elements.batchResults.style.display = 'none';
+    if (elements.comparisonResults) elements.comparisonResults.style.display = 'none';
+    if (elements.errorContainer) elements.errorContainer.style.display = 'none';
+
+    // Show early warning results
+    elements.earlyWarningResults.style.display = 'block';
+
+    // Display severity banner
+    displaySeverityBanner(data.severity, data.consensus);
+
+    // Display consensus
+    displayConsensus(data.consensus);
+
+    // Display model predictions
+    displayModelPredictions(data.model_predictions);
+
+    // Display treatment recommendations
+    displayEWTreatment(data.treatment);
+    initEWTreatmentTabs(data.treatment);
+
+    // Display severity factors
+    displaySeverityFactors(data.severity);
+
+    // Display meta
+    if (elements.ewMeta) {
+        elements.ewMeta.innerHTML = `
+            <div class="ew-meta-info">
+                <span>Analysis completed in ${data.metadata?.total_processing_time_ms?.toFixed(0) || '?'}ms</span>
+                <span>Models consulted: ${data.metadata?.models_consulted || '?'}</span>
+                ${data.metadata?.region ? `<span>Region: ${data.metadata.region}</span>` : ''}
+            </div>
+        `;
+    }
+}
+
+function displaySeverityBanner(severity, consensus) {
+    const banner = elements.severityBanner;
+    if (!banner) return;
+
+    // Set severity class
+    banner.className = `severity-banner severity-${severity.level}`;
+
+    // Update score
+    elements.severityScore.textContent = Math.round(severity.score);
+    elements.severityLabel.textContent = severity.level.toUpperCase();
+
+    // Update urgency info
+    elements.severityUrgency.textContent = consensus.is_healthy
+        ? 'Plant Appears Healthy'
+        : consensus.disease_name;
+    elements.severityTimeline.textContent = severity.urgency;
+}
+
+function displayConsensus(consensus) {
+    const container = elements.consensusContent;
+    if (!container) return;
+
+    const agreementPercent = (consensus.model_agreement * 100).toFixed(0);
+    const confidencePercent = (consensus.confidence * 100).toFixed(0);
+
+    container.innerHTML = `
+        <div class="consensus-main">
+            <div class="consensus-disease ${consensus.is_healthy ? 'healthy' : 'diseased'}">
+                <span class="disease-name">${consensus.disease_name}</span>
+                <span class="confidence-badge">${confidencePercent}% confidence</span>
+            </div>
+            <div class="consensus-agreement">
+                <div class="agreement-bar">
+                    <div class="agreement-fill" style="width: ${agreementPercent}%"></div>
+                </div>
+                <span class="agreement-text">${agreementPercent}% model agreement</span>
+            </div>
+        </div>
+        <div class="consensus-reasoning">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="12" y1="16" x2="12" y2="12"/>
+                <line x1="12" y1="8" x2="12.01" y2="8"/>
+            </svg>
+            <p>${consensus.reasoning}</p>
+        </div>
+        <div class="consensus-models">
+            ${consensus.supporting_models.length > 0 ? `
+                <div class="models-group supporting">
+                    <span class="models-label">Supporting:</span>
+                    ${consensus.supporting_models.map(m => `<span class="model-tag support">${m}</span>`).join('')}
+                </div>
+            ` : ''}
+            ${consensus.dissenting_models.length > 0 ? `
+                <div class="models-group dissenting">
+                    <span class="models-label">Different opinion:</span>
+                    ${consensus.dissenting_models.map(m => `<span class="model-tag dissent">${m}</span>`).join('')}
+                </div>
+            ` : ''}
+        </div>
+    `;
+}
+
+function displayModelPredictions(predictions) {
+    const grid = elements.modelPredictionsGrid;
+    if (!grid) return;
+
+    grid.innerHTML = predictions.map(pred => {
+        const hasError = pred.error;
+        const isHealthy = (pred.prediction || '').toLowerCase().includes('healthy');
+        const confidencePercent = ((pred.confidence || 0) * 100).toFixed(1);
+
+        if (hasError) {
+            return `
+                <div class="model-prediction-card error">
+                    <div class="mpc-header">
+                        <h4>${pred.model_name}</h4>
+                        <span class="mpc-type">${pred.model_type}</span>
+                    </div>
+                    <div class="mpc-error">
+                        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/>
+                            <line x1="12" y1="8" x2="12" y2="12"/>
+                            <line x1="12" y1="16" x2="12.01" y2="16"/>
+                        </svg>
+                        <span>${pred.error}</span>
+                    </div>
+                </div>
+            `;
+        }
+
+        return `
+            <div class="model-prediction-card ${isHealthy ? 'healthy' : 'diseased'}">
+                <div class="mpc-header">
+                    <h4>${pred.model_name}</h4>
+                    <span class="mpc-type">${pred.model_type}</span>
+                </div>
+                <div class="mpc-prediction">
+                    <span class="mpc-disease ${isHealthy ? 'healthy' : 'diseased'}">${pred.prediction || 'Unknown'}</span>
+                    <div class="mpc-confidence">
+                        <div class="confidence-bar-mini">
+                            <div class="confidence-fill-mini" style="width: ${confidencePercent}%"></div>
+                        </div>
+                        <span>${confidencePercent}%</span>
+                    </div>
+                </div>
+                <div class="mpc-explanation">
+                    <p>${pred.explanation}</p>
+                </div>
+                ${pred.contributing_factors && pred.contributing_factors.length > 0 ? `
+                    <div class="mpc-factors">
+                        <span class="factors-label">Contributing factors:</span>
+                        <ul>
+                            ${pred.contributing_factors.map(f => `<li>${f}</li>`).join('')}
+                        </ul>
+                    </div>
+                ` : ''}
+                <div class="mpc-time">
+                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"/>
+                        <polyline points="12 6 12 12 16 14"/>
+                    </svg>
+                    ${pred.processing_time_ms?.toFixed(0) || '?'}ms
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+let currentEWTreatmentTab = 'immediate';
+let ewTreatmentData = null;
+
+function displayEWTreatment(treatment) {
+    ewTreatmentData = treatment;
+    displayEWTreatmentTab('immediate');
+
+    // Display meta info
+    if (elements.treatmentMetaEW) {
+        elements.treatmentMetaEW.innerHTML = `
+            <div class="treatment-meta-grid">
+                <div class="meta-item">
+                    <span class="meta-label">Monitoring Schedule</span>
+                    <span class="meta-value">${treatment.monitoring_schedule}</span>
+                </div>
+                <div class="meta-item">
+                    <span class="meta-label">Estimated Recovery</span>
+                    <span class="meta-value">${treatment.estimated_recovery}</span>
+                </div>
+                ${treatment.weather_considerations ? `
+                    <div class="meta-item full-width">
+                        <span class="meta-label">Weather Considerations</span>
+                        <span class="meta-value">${treatment.weather_considerations}</span>
+                    </div>
+                ` : ''}
+                ${treatment.regional_notes ? `
+                    <div class="meta-item full-width regional">
+                        <span class="meta-label">Regional Notes</span>
+                        <span class="meta-value">${treatment.regional_notes}</span>
+                    </div>
+                ` : ''}
+            </div>
+        `;
+    }
+}
+
+function initEWTreatmentTabs(treatment) {
+    document.querySelectorAll('.treatment-tab-ew').forEach(tab => {
+        tab.addEventListener('click', () => {
+            const tabType = tab.dataset.treatmentEw;
+
+            // Update active state
+            document.querySelectorAll('.treatment-tab-ew').forEach(t =>
+                t.classList.toggle('active', t.dataset.treatmentEw === tabType)
+            );
+
+            currentEWTreatmentTab = tabType;
+            displayEWTreatmentTab(tabType);
+        });
+    });
+}
+
+function displayEWTreatmentTab(tabType) {
+    if (!ewTreatmentData || !elements.treatmentContentEW) return;
+
+    const tabMapping = {
+        'immediate': 'immediate_actions',
+        'organic': 'organic_treatments',
+        'chemical': 'chemical_treatments',
+        'prevention': 'prevention_measures'
+    };
+
+    const items = ewTreatmentData[tabMapping[tabType]] || [];
+
+    if (items.length === 0) {
+        elements.treatmentContentEW.innerHTML = `
+            <p class="no-treatment">No ${tabType} recommendations available</p>
+        `;
+        return;
+    }
+
+    elements.treatmentContentEW.innerHTML = `
+        <div class="treatment-list-ew">
+            ${items.map((item, i) => `
+                <div class="treatment-item-ew">
+                    <span class="treatment-number">${i + 1}</span>
+                    <span class="treatment-text">${item}</span>
+                </div>
+            `).join('')}
+        </div>
+    `;
+}
+
+function displaySeverityFactors(severity) {
+    const container = elements.factorsList;
+    if (!container) return;
+
+    container.innerHTML = severity.factors.map(factor => `
+        <div class="factor-item">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="9 11 12 14 22 4"/>
+                <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+            </svg>
+            <span>${factor}</span>
+        </div>
+    `).join('');
 }
 
 function displaySingleModelResult(data, modelKey) {
