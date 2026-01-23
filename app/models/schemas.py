@@ -447,3 +447,155 @@ class AvailableModelsResponse(BaseModel):
     """Response listing available models for comparison."""
     internal_model: dict = Field(..., description="Internal model info")
     external_models: list[dict] = Field(..., description="Available external models")
+
+
+# === Species Consensus Schemas ===
+
+class TaxonomyLevelConsensus(BaseModel):
+    """
+    Consensus at a single taxonomy level with model support tracking.
+    """
+    name: str = Field(..., description="Consensus name at this level")
+    confidence: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="Average confidence across supporting models"
+    )
+    supporting_models: list[str] = Field(
+        default_factory=list,
+        description="Models that support this identification"
+    )
+    alternative_names: Optional[list[dict]] = Field(
+        default=None,
+        description="Alternative identifications at this level"
+    )
+
+
+class TaxonomyDisagreementInfo(BaseModel):
+    """
+    Information about a model that disagrees with consensus.
+    """
+    model: str = Field(..., description="Model name")
+    prediction: str = Field(..., description="Model's prediction")
+    confidence: float = Field(..., ge=0.0, le=1.0, description="Model's confidence")
+    level: str = Field(..., description="Taxonomy level of disagreement: family, genus, or species")
+
+
+class SpeciesConsensusResponse(BaseModel):
+    """
+    Multi-model species consensus result.
+
+    Aggregates predictions from multiple species identification models
+    into a confidence-weighted consensus with disagreement tracking.
+    """
+    family: TaxonomyLevelConsensus = Field(
+        ...,
+        description="Consensus family identification"
+    )
+    genus: TaxonomyLevelConsensus = Field(
+        ...,
+        description="Consensus genus identification"
+    )
+    species: TaxonomyLevelConsensus = Field(
+        ...,
+        description="Consensus species identification"
+    )
+    common_name: Optional[str] = Field(
+        default=None,
+        description="Most common name across models"
+    )
+    overall_confidence: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="Overall weighted confidence score"
+    )
+    agreement_score: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="Agreement score between models (0-1)"
+    )
+    supporting_models: list[str] = Field(
+        default_factory=list,
+        description="All models that contributed valid predictions"
+    )
+    total_models: int = Field(
+        ...,
+        description="Total number of models consulted"
+    )
+    disagreements: list[TaxonomyDisagreementInfo] = Field(
+        default_factory=list,
+        description="Models that disagree with consensus"
+    )
+    notes: str = Field(
+        default="",
+        description="Human-readable notes about the consensus"
+    )
+
+
+class TaxonomyAgreement(BaseModel):
+    """
+    Taxonomy agreement analysis for model comparison.
+    """
+    family_agreement: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="Fraction of models agreeing on family"
+    )
+    genus_agreement: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="Fraction of models agreeing on genus"
+    )
+    species_agreement: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="Fraction of models agreeing on species"
+    )
+    divergence_level: Optional[str] = Field(
+        default=None,
+        description="Deepest level where models diverge: family, genus, or species"
+    )
+    divergence_details: Optional[list[dict]] = Field(
+        default=None,
+        description="Details about specific divergences"
+    )
+
+
+class SpeciesModelPrediction(BaseModel):
+    """
+    Species prediction from a single model with full taxonomy.
+    """
+    model_name: str = Field(..., description="Model display name")
+    model_type: str = Field(..., description="Model type identifier")
+    species: Optional[dict] = Field(
+        default=None,
+        description="Taxonomy prediction (family, genus, species, common_name)"
+    )
+    confidence: Optional[float] = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Prediction confidence"
+    )
+    taxonomy_depth: str = Field(
+        default="unknown",
+        description="Depth of taxonomy prediction: species, genus, family, or unknown"
+    )
+    processing_time_ms: float = Field(
+        default=0.0,
+        description="Processing time in milliseconds"
+    )
+    raw_label: Optional[str] = Field(
+        default=None,
+        description="Raw label from model"
+    )
+    error: Optional[str] = Field(
+        default=None,
+        description="Error message if prediction failed"
+    )

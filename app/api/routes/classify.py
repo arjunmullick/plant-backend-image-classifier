@@ -698,12 +698,26 @@ class TreatmentResponse(BaseModel):
     is_fallback: bool = False
 
 
+class SpeciesConsensusEWResponse(BaseModel):
+    """Species consensus in early warning response."""
+    family: str
+    genus: str
+    species: str
+    common_name: Optional[str] = None
+    confidence: float
+    agreement: float
+    supporting_models: list[str]
+    notes: str
+    disagreements: list[dict] = []
+
+
 class EarlyWarningResponse(BaseModel):
     """Complete early warning system response."""
     model_predictions: list[ModelPredictionResponse]
     consensus: ConsensusResponse
     severity: SeverityResponse
     treatment: TreatmentResponse
+    species_consensus: Optional[SpeciesConsensusEWResponse] = None
     metadata: dict
 
 
@@ -817,6 +831,17 @@ async def early_warning_analysis(
                 data_source_url=getattr(result.treatment, 'data_source_url', None),
                 is_fallback=result.treatment.is_fallback
             ),
+            species_consensus=SpeciesConsensusEWResponse(
+                family=result.species_consensus.family,
+                genus=result.species_consensus.genus,
+                species=result.species_consensus.species,
+                common_name=result.species_consensus.common_name,
+                confidence=result.species_consensus.confidence,
+                agreement=result.species_consensus.agreement,
+                supporting_models=result.species_consensus.supporting_models,
+                notes=result.species_consensus.notes,
+                disagreements=result.species_consensus.disagreements,
+            ) if result.species_consensus else None,
             metadata=result.metadata
         )
 

@@ -101,12 +101,27 @@ class LocalizedTreatment:
 
 
 @dataclass
+class SpeciesConsensusResult:
+    """Species identification consensus from multiple models."""
+    family: str
+    genus: str
+    species: str
+    common_name: Optional[str]
+    confidence: float
+    agreement: float
+    supporting_models: List[str]
+    notes: str
+    disagreements: List[Dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass
 class EarlyWarningResult:
     """Complete early warning system result."""
     model_predictions: List[ModelPrediction]
     consensus: DiseaseConsensus
     severity: SeverityAssessment
     treatment: LocalizedTreatment
+    species_consensus: Optional[SpeciesConsensusResult] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -117,6 +132,10 @@ class EarlyWarningService:
         self.registry = get_external_model_registry()
         self.treatment_loader = get_treatment_loader()
 
+        # Species consensus components (lazy-loaded)
+        self._species_registry = None
+        self._consensus_engine = None
+
         # Log data loading status
         metadata = self.treatment_loader.get_metadata()
         if metadata["loaded"]:
@@ -125,6 +144,26 @@ class EarlyWarningService:
         else:
             logger.warning(f"Treatment data not loaded: {metadata['load_error']}. "
                           f"Using fallback responses.")
+
+    def _get_species_registry(self):
+        """Lazy-load species model registry."""
+        if self._species_registry is None:
+            try:
+                from app.ml.species_models import get_species_model_registry
+                self._species_registry = get_species_model_registry()
+            except ImportError:
+                logger.warning("Species models not available")
+        return self._species_registry
+
+    def _get_consensus_engine(self):
+        """Lazy-load consensus engine."""
+        if self._consensus_engine is None:
+            try:
+                from app.ml.species_models import SpeciesConsensusEngine
+                self._consensus_engine = SpeciesConsensusEngine()
+            except ImportError:
+                logger.warning("Consensus engine not available")
+        return self._consensus_engine
 
     async def analyze(
         self,
@@ -163,7 +202,7 @@ class EarlyWarningService:
                 kindwise_model.api_key = kindwise_api_key
                 kindwise_model.is_loaded = True
 
-        # Run all models in parallel
+        # Run all disease models in parallel
         model_results = await self._run_all_models(image, include_internal)
 
         # Convert to predictions with explanations
@@ -172,8 +211,19 @@ class EarlyWarningService:
         # Determine consensus disease
         consensus = self._determine_consensus(predictions)
 
+        # Run species models and compute consensus
+        species_consensus = await self._compute_species_consensus(
+            image,
+            plantnet_api_key=plantnet_api_key,
+            kindwise_api_key=kindwise_api_key,
+        )
+
         # Calculate severity (uses data loader)
         severity = self._calculate_severity(consensus, predictions)
+
+        # Adjust severity based on species confidence
+        if species_consensus:
+            severity = self._adjust_severity_by_species(severity, species_consensus)
 
         # Generate treatment recommendations (uses data loader)
         treatment = self._generate_treatment(consensus, severity, region)
@@ -188,6 +238,7 @@ class EarlyWarningService:
             consensus=consensus,
             severity=severity,
             treatment=treatment,
+            species_consensus=species_consensus,
             metadata={
                 "total_processing_time_ms": total_time,
                 "models_consulted": len(predictions),
@@ -201,6 +252,7 @@ class EarlyWarningService:
                 },
                 "severity_is_fallback": severity.is_fallback,
                 "treatment_is_fallback": treatment.is_fallback,
+                "species_consensus_computed": species_consensus is not None,
             }
         )
 
@@ -538,6 +590,154 @@ class EarlyWarningService:
             return regional_data.notes
 
         return f"No specific notes for region '{region}'. Consult local agricultural extension."
+
+    async def _compute_species_consensus(
+        self,
+        image: Image.Image,
+        plantnet_api_key: Optional[str] = None,
+        kindwise_api_key: Optional[str] = None,
+    ) -> Optional[SpeciesConsensusResult]:
+        """
+        Compute species consensus from multiple models.
+
+        Args:
+            image: PIL Image to analyze
+            plantnet_api_key: Optional PlantNet API key
+            kindwise_api_key: Optional Kindwise API key
+
+        Returns:
+            SpeciesConsensusResult or None if species models unavailable
+        """
+        try:
+            species_registry = self._get_species_registry()
+            consensus_engine = self._get_consensus_engine()
+
+            if species_registry is None or consensus_engine is None:
+                logger.debug("Species consensus not available - models not loaded")
+                return None
+
+            # Initialize species registry with API keys
+            species_registry.initialize(
+                plantnet_api_key=plantnet_api_key,
+                kindwise_api_key=kindwise_api_key,
+                enable_huggingface=True,
+                enable_internal=True,
+            )
+
+            # Run all species models in parallel
+            predictions = await species_registry.predict_all(image, timeout=30.0)
+
+            if not predictions:
+                logger.warning("No species predictions returned")
+                return None
+
+            # Convert to list of predictions
+            prediction_list = list(predictions.values())
+
+            # Compute consensus
+            consensus = consensus_engine.compute_consensus(prediction_list)
+
+            # Convert to result format
+            return SpeciesConsensusResult(
+                family=consensus.family.name,
+                genus=consensus.genus.name,
+                species=consensus.species.name,
+                common_name=consensus.common_name,
+                confidence=consensus.overall_confidence,
+                agreement=consensus.agreement_score,
+                supporting_models=consensus.supporting_models,
+                notes=consensus.notes,
+                disagreements=[d.to_dict() for d in consensus.disagreements],
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to compute species consensus: {e}")
+            return None
+
+    def _adjust_severity_by_species(
+        self,
+        severity: SeverityAssessment,
+        species_consensus: SpeciesConsensusResult
+    ) -> SeverityAssessment:
+        """
+        Adjust severity based on species identification confidence.
+
+        Logic:
+        - High disease confidence + low species confidence → downgrade severity
+        - High agreement across both → can increase severity
+        """
+        adjustment = 0
+        additional_factors = []
+
+        # High species confidence increases reliability
+        if species_consensus.confidence >= 0.85 and species_consensus.agreement >= 0.8:
+            adjustment += 5
+            additional_factors.append(
+                f"Species identification high ({species_consensus.confidence:.0%}) - reliable crop ID"
+            )
+        elif species_consensus.confidence >= 0.7:
+            additional_factors.append(
+                f"Species identification good ({species_consensus.confidence:.0%})"
+            )
+
+        # Low species confidence decreases reliability
+        if species_consensus.confidence < 0.5:
+            adjustment -= 10
+            additional_factors.append(
+                f"⚠️ Low species confidence ({species_consensus.confidence:.0%}) - treatment uncertain"
+            )
+        elif species_consensus.confidence < 0.7:
+            adjustment -= 5
+            additional_factors.append(
+                f"Moderate species uncertainty ({species_consensus.confidence:.0%})"
+            )
+
+        # Low agreement indicates conflicting identifications
+        if species_consensus.agreement < 0.5:
+            adjustment -= 5
+            additional_factors.append(
+                f"Low model agreement ({species_consensus.agreement:.0%}) - species disputed"
+            )
+
+        # Family-level disagreements are severe
+        family_disagreements = sum(
+            1 for d in species_consensus.disagreements if d.get("level") == "family"
+        )
+        if family_disagreements > 0:
+            adjustment -= 10
+            additional_factors.append(
+                f"⚠️ {family_disagreements} model(s) disagree on plant family"
+            )
+
+        # Calculate adjusted score
+        adjusted_score = max(0, min(100, severity.score + adjustment))
+
+        # Determine new severity level based on adjusted score
+        if adjusted_score >= 80:
+            new_level = SeverityLevel.CRITICAL
+            new_urgency = "CRITICAL: Immediate action required within 24-48 hours"
+        elif adjusted_score >= 60:
+            new_level = SeverityLevel.HIGH
+            new_urgency = "HIGH: Take action within 3-5 days"
+        elif adjusted_score >= 40:
+            new_level = SeverityLevel.MODERATE
+            new_urgency = "MODERATE: Address within 1-2 weeks"
+        elif adjusted_score > 0:
+            new_level = SeverityLevel.LOW
+            new_urgency = "LOW: Monitor and treat preventively"
+        else:
+            new_level = SeverityLevel.HEALTHY
+            new_urgency = "No action needed"
+
+        # Return updated severity
+        return SeverityAssessment(
+            level=new_level,
+            score=adjusted_score,
+            factors=severity.factors + additional_factors,
+            urgency=new_urgency,
+            action_timeline=new_urgency,
+            is_fallback=severity.is_fallback,
+        )
 
 
 # Singleton instance
