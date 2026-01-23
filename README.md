@@ -7,7 +7,7 @@ A production-grade backend service for plant species identification, disease det
 | Document | Description |
 |----------|-------------|
 | [README.md](README.md) | This file - System overview and API documentation |
-| [TRAINING_GUIDE.md](TRAINING_GUIDE.md) | **GPU-free training guide** - How to train models without local GPU |
+| [docs/docs/TRAINING_GUIDE.md](docs/docs/TRAINING_GUIDE.md) | **GPU-free training guide** - How to train models without local GPU |
 
 ## Quick Links
 
@@ -16,7 +16,9 @@ A production-grade backend service for plant species identification, disease det
 - **Web UI**: http://localhost:8000 (interactive classification interface)
 - **API Docs**: http://localhost:8000/docs (Swagger documentation)
 - **Compare Models**: http://localhost:8000 → "Compare Models" tab
-- **Train a model**: See [TRAINING_GUIDE.md](TRAINING_GUIDE.md)
+- **Early Warning**: http://localhost:8000 → "Early Warning" tab
+- **Local Training**: http://localhost:8000 → "Training" tab (train models on your Mac)
+- **Train with Modal**: See [docs/docs/TRAINING_GUIDE.md](docs/docs/TRAINING_GUIDE.md)
 - **Run tests**: `pytest tests/ -v`
 
 ## System Overview
@@ -252,6 +254,14 @@ Content-Type: application/json
 | `/api/v1/classify/supported-diseases` | GET | List supported diseases |
 | `/api/v1/health` | GET | Basic health check |
 | `/api/v1/health/ready` | GET | Detailed readiness check with model versions |
+| `/api/v1/training/dataset/status` | GET | Check dataset availability and info |
+| `/api/v1/training/dataset/download` | POST | Download training dataset (PlantVillage, etc.) |
+| `/api/v1/training/start` | POST | Start model training with configuration |
+| `/api/v1/training/status/{job_id}` | GET | Get training job status and metrics |
+| `/api/v1/training/stop` | POST | Stop running training job |
+| `/api/v1/training/test` | POST | Test trained model with an image |
+| `/api/v1/training/deploy` | POST | Deploy trained model as default |
+| `/api/v1/training/download` | POST | Download trained model file |
 
 ## Quick Start
 
@@ -485,7 +495,7 @@ plant-backend-image-classifier/
 │   └── upload_to_hub.py            # Upload to HF Hub
 ├── requirements.txt
 ├── README.md
-└── TRAINING_GUIDE.md               # GPU-free training documentation
+└── docs/TRAINING_GUIDE.md               # GPU-free training documentation
 ```
 
 ---
@@ -508,12 +518,13 @@ http://localhost:8000
 
 | Mode | Description |
 |------|-------------|
+| **Compare Models** | Side-by-side comparison across multiple ML models |
+| **Early Warning** | Comprehensive disease analysis using ALL models in parallel |
 | **Full Analysis** | Complete pipeline: species identification + disease detection + treatment recommendations |
-| **Early Warning** | **NEW**: Comprehensive disease analysis using ALL models in parallel |
 | **Species Only** | Fast species identification with taxonomy (Family → Genus → Species) |
 | **Disease Only** | Disease detection with optional crop hint for better accuracy |
 | **Batch (10 max)** | Process multiple images at once with summary statistics |
-| **Compare Models** | Side-by-side comparison across multiple ML models |
+| **Training** | **NEW**: Train and fine-tune models locally on your Mac with live metrics |
 
 ### Compare Models Mode
 
@@ -1043,7 +1054,7 @@ modal run training/modal_train.py --dataset-path your-username/plantvillage --ep
 | Full training run (15 epochs) | ~$2-5 |
 | Monthly iteration budget | ~$10-25 |
 
-For detailed training documentation, see **[TRAINING_GUIDE.md](TRAINING_GUIDE.md)**.
+For detailed training documentation, see **[docs/TRAINING_GUIDE.md](docs/TRAINING_GUIDE.md)**.
 
 ---
 

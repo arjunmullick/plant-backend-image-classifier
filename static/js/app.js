@@ -29,6 +29,18 @@ const state = {
     apiKeys: {
         plantnet: null,
         kindwise: null
+    },
+    // Training state
+    training: {
+        isTraining: false,
+        currentEpoch: 0,
+        totalEpochs: 10,
+        metrics: [],
+        logs: [],
+        bestValAcc: 0,
+        modelPath: null,
+        trainingChart: null,
+        statusCheckInterval: null
     }
 };
 
@@ -119,6 +131,55 @@ const elements = {
     comparisonGrid: document.getElementById('comparisonGrid'),
     comparisonMeta: document.getElementById('comparisonMeta'),
 
+    // Training Mode
+    trainingPanel: document.getElementById('trainingPanel'),
+    datasetStatus: document.getElementById('datasetStatus'),
+    downloadDatasetBtn: document.getElementById('downloadDatasetBtn'),
+    datasetSelect: document.getElementById('datasetSelect'),
+    downloadProgress: document.getElementById('downloadProgress'),
+    downloadProgressFill: document.getElementById('downloadProgressFill'),
+    downloadProgressText: document.getElementById('downloadProgressText'),
+    baseModel: document.getElementById('baseModel'),
+    epochs: document.getElementById('epochs'),
+    batchSize: document.getElementById('batchSize'),
+    learningRate: document.getElementById('learningRate'),
+    device: document.getElementById('device'),
+    augmentation: document.getElementById('augmentation'),
+    enableWandb: document.getElementById('enableWandb'),
+    saveCheckpoints: document.getElementById('saveCheckpoints'),
+    enableEarlyStopping: document.getElementById('enableEarlyStopping'),
+    startTrainingBtn: document.getElementById('startTrainingBtn'),
+    stopTrainingBtn: document.getElementById('stopTrainingBtn'),
+
+    // Training Results
+    trainingResults: document.getElementById('trainingResults'),
+    trainingStatusBanner: document.getElementById('trainingStatusBanner'),
+    trainingStatusIcon: document.getElementById('trainingStatusIcon'),
+    trainingStatusTitle: document.getElementById('trainingStatusTitle'),
+    trainingStatusMessage: document.getElementById('trainingStatusMessage'),
+    metricsGrid: document.getElementById('metricsGrid'),
+    currentEpoch: document.getElementById('currentEpoch'),
+    trainLoss: document.getElementById('trainLoss'),
+    trainAccuracy: document.getElementById('trainAccuracy'),
+    valLoss: document.getElementById('valLoss'),
+    valAccuracy: document.getElementById('valAccuracy'),
+    bestValAccuracy: document.getElementById('bestValAccuracy'),
+    currentLR: document.getElementById('currentLR'),
+    trainingETA: document.getElementById('trainingETA'),
+    trainingChart: document.getElementById('trainingChart'),
+    trainingLog: document.getElementById('trainingLog'),
+    testSection: document.getElementById('testSection'),
+    testUploadArea: document.getElementById('testUploadArea'),
+    testFileInput: document.getElementById('testFileInput'),
+    testImagePreview: document.getElementById('testImagePreview'),
+    testPredictions: document.getElementById('testPredictions'),
+    testResults: document.getElementById('testResults'),
+    trainingSummary: document.getElementById('trainingSummary'),
+    summaryContent: document.getElementById('summaryContent'),
+    deployModelBtn: document.getElementById('deployModelBtn'),
+    downloadModelBtn: document.getElementById('downloadModelBtn'),
+    exportToHFBtn: document.getElementById('exportToHFBtn'),
+
     // Toast
     toastContainer: document.getElementById('toastContainer'),
 };
@@ -132,6 +193,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initOptions();
     initTreatmentTabs();
     initApiKeyInputs();
+    initTraining();
     checkAPIHealth();
 
     // Retry button
@@ -222,6 +284,26 @@ function setMode(mode) {
     // Show/hide early warning panel
     if (elements.earlyWarningPanel) {
         elements.earlyWarningPanel.style.display = mode === 'early-warning' ? 'block' : 'none';
+    }
+
+    // Show/hide training panel
+    if (elements.trainingPanel) {
+        elements.trainingPanel.style.display = mode === 'training' ? 'block' : 'none';
+    }
+
+    // Show/hide upload area for training mode
+    if (elements.uploadArea) {
+        elements.uploadArea.style.display = mode === 'training' ? 'none' : 'block';
+    }
+
+    // Show/hide analyze button for training mode
+    if (elements.analyzeBtn) {
+        elements.analyzeBtn.style.display = mode === 'training' ? 'none' : 'flex';
+    }
+
+    // Check dataset status when entering training mode
+    if (mode === 'training') {
+        checkDatasetStatus();
     }
 
     // Update file input for batch mode
@@ -1775,4 +1857,676 @@ function showToast(type, title, message) {
         toast.style.animation = 'slideIn 0.3s ease reverse';
         setTimeout(() => toast.remove(), 300);
     }, 5000);
+}
+
+// ============================================
+// Training Functions
+// ============================================
+function initTraining() {
+    // Download dataset button
+    elements.downloadDatasetBtn?.addEventListener('click', handleDownloadDataset);
+
+    // Start training button
+    elements.startTrainingBtn?.addEventListener('click', handleStartTraining);
+
+    // Stop training button
+    elements.stopTrainingBtn?.addEventListener('click', handleStopTraining);
+
+    // Test model upload
+    elements.testUploadArea?.addEventListener('click', () => {
+        elements.testFileInput?.click();
+    });
+
+    elements.testFileInput?.addEventListener('change', handleTestImage);
+
+    // Model actions
+    elements.deployModelBtn?.addEventListener('click', handleDeployModel);
+    elements.downloadModelBtn?.addEventListener('click', handleDownloadModel);
+    elements.exportToHFBtn?.addEventListener('click', handleExportToHF);
+}
+
+async function checkDatasetStatus() {
+    const statusEl = elements.datasetStatus;
+    if (!statusEl) return;
+
+    statusEl.innerHTML = `
+        <div class="status-indicator checking">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/>
+                <polyline points="12 6 12 12 16 14"/>
+            </svg>
+            <span>Checking dataset status...</span>
+        </div>
+    `;
+
+    try {
+        const response = await fetch(`${API_BASE}/training/dataset/status`);
+        const data = await response.json();
+
+        if (data.available) {
+            statusEl.innerHTML = `
+                <div class="status-indicator available">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                        <polyline points="22 4 12 14.01 9 11.01"/>
+                    </svg>
+                    <span>Dataset available: ${data.name} (${data.num_classes} classes, ${data.num_images?.toLocaleString() || '?'} images)</span>
+                </div>
+            `;
+            elements.downloadDatasetBtn.textContent = 'Re-download Dataset';
+        } else {
+            statusEl.innerHTML = `
+                <div class="status-indicator missing">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"/>
+                        <line x1="12" y1="8" x2="12" y2="12"/>
+                        <line x1="12" y1="16" x2="12.01" y2="16"/>
+                    </svg>
+                    <span>No dataset found. Please download one to begin training.</span>
+                </div>
+            `;
+        }
+    } catch (error) {
+        statusEl.innerHTML = `
+            <div class="status-indicator missing">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <line x1="12" y1="8" x2="12" y2="12"/>
+                    <line x1="12" y1="16" x2="12.01" y2="16"/>
+                </svg>
+                <span>Could not check dataset status. Training API may not be available.</span>
+            </div>
+        `;
+    }
+}
+
+async function handleDownloadDataset() {
+    const dataset = elements.datasetSelect?.value || 'plantvillage';
+    const progressEl = elements.downloadProgress;
+    const fillEl = elements.downloadProgressFill;
+    const textEl = elements.downloadProgressText;
+
+    if (progressEl) progressEl.style.display = 'block';
+    elements.downloadDatasetBtn.disabled = true;
+    elements.downloadDatasetBtn.innerHTML = `
+        <svg class="spinner" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+        </svg>
+        Downloading...
+    `;
+
+    try {
+        const response = await fetch(`${API_BASE}/training/dataset/download`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ dataset_name: dataset }),
+        });
+
+        if (!response.ok) {
+            throw new Error('Failed to start download');
+        }
+
+        // Poll for progress
+        const checkProgress = async () => {
+            try {
+                const statusResp = await fetch(`${API_BASE}/training/dataset/status`);
+                const statusData = await statusResp.json();
+
+                if (statusData.downloading) {
+                    const progress = statusData.progress || 0;
+                    if (fillEl) fillEl.style.width = `${progress}%`;
+                    if (textEl) textEl.textContent = `${Math.round(progress)}% - ${statusData.message || 'Downloading...'}`;
+                    setTimeout(checkProgress, 1000);
+                } else if (statusData.available) {
+                    if (fillEl) fillEl.style.width = '100%';
+                    if (textEl) textEl.textContent = 'Download complete!';
+                    showToast('success', 'Dataset Downloaded', `${dataset} dataset is now available`);
+                    checkDatasetStatus();
+                    setTimeout(() => {
+                        if (progressEl) progressEl.style.display = 'none';
+                    }, 2000);
+                }
+            } catch (e) {
+                console.error('Progress check error:', e);
+            }
+        };
+
+        setTimeout(checkProgress, 1000);
+
+    } catch (error) {
+        showToast('error', 'Download Failed', error.message);
+        if (progressEl) progressEl.style.display = 'none';
+    } finally {
+        elements.downloadDatasetBtn.disabled = false;
+        elements.downloadDatasetBtn.innerHTML = `
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="7 10 12 15 17 10"/>
+                <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            Download PlantVillage Dataset
+        `;
+    }
+}
+
+function getTrainingConfig() {
+    return {
+        base_model: elements.baseModel?.value || 'mobilenet_v2',
+        epochs: parseInt(elements.epochs?.value) || 10,
+        batch_size: parseInt(elements.batchSize?.value) || 32,
+        learning_rate: parseFloat(elements.learningRate?.value) || 0.0001,
+        device: elements.device?.value || 'auto',
+        augmentation: elements.augmentation?.value || 'standard',
+        enable_wandb: elements.enableWandb?.checked || false,
+        save_checkpoints: elements.saveCheckpoints?.checked || true,
+        early_stopping: elements.enableEarlyStopping?.checked || true,
+        dataset: elements.datasetSelect?.value || 'plantvillage'
+    };
+}
+
+async function handleStartTraining() {
+    const config = getTrainingConfig();
+
+    // Disable start, enable stop
+    elements.startTrainingBtn.disabled = true;
+    elements.stopTrainingBtn.disabled = false;
+
+    // Show training results
+    if (elements.trainingResults) {
+        elements.trainingResults.style.display = 'flex';
+    }
+    if (elements.resultsSection) {
+        elements.resultsSection.style.display = 'block';
+    }
+
+    // Reset state
+    state.training.isTraining = true;
+    state.training.currentEpoch = 0;
+    state.training.totalEpochs = config.epochs;
+    state.training.metrics = [];
+    state.training.logs = [];
+    state.training.bestValAcc = 0;
+
+    // Initialize chart
+    initTrainingChart();
+
+    // Update status
+    updateTrainingStatus('training', 'Training Started', 'Initializing model and loading data...');
+    addTrainingLog('info', `Starting training with ${config.base_model} model...`);
+    addTrainingLog('info', `Configuration: ${config.epochs} epochs, batch size ${config.batch_size}, LR ${config.learning_rate}`);
+
+    try {
+        const response = await fetch(`${API_BASE}/training/start`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(config),
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to start training');
+        }
+
+        const data = await response.json();
+        addTrainingLog('success', `Training job started: ${data.job_id}`);
+
+        // Start polling for status
+        state.training.statusCheckInterval = setInterval(() => checkTrainingStatus(data.job_id), 2000);
+
+    } catch (error) {
+        showToast('error', 'Training Failed', error.message);
+        addTrainingLog('error', `Error: ${error.message}`);
+        updateTrainingStatus('error', 'Training Failed', error.message);
+        elements.startTrainingBtn.disabled = false;
+        elements.stopTrainingBtn.disabled = true;
+        state.training.isTraining = false;
+    }
+}
+
+async function checkTrainingStatus(jobId) {
+    try {
+        const response = await fetch(`${API_BASE}/training/status/${jobId}`);
+        const data = await response.json();
+
+        if (data.status === 'running') {
+            // Update metrics
+            if (data.current_epoch !== undefined) {
+                state.training.currentEpoch = data.current_epoch;
+                updateMetricDisplay('currentEpoch', `${data.current_epoch}/${state.training.totalEpochs}`);
+            }
+            if (data.train_loss !== undefined) {
+                updateMetricDisplay('trainLoss', data.train_loss.toFixed(4));
+            }
+            if (data.train_accuracy !== undefined) {
+                updateMetricDisplay('trainAccuracy', `${(data.train_accuracy * 100).toFixed(1)}%`);
+            }
+            if (data.val_loss !== undefined) {
+                updateMetricDisplay('valLoss', data.val_loss.toFixed(4));
+            }
+            if (data.val_accuracy !== undefined) {
+                updateMetricDisplay('valAccuracy', `${(data.val_accuracy * 100).toFixed(1)}%`);
+                if (data.val_accuracy > state.training.bestValAcc) {
+                    state.training.bestValAcc = data.val_accuracy;
+                    updateMetricDisplay('bestValAccuracy', `${(data.val_accuracy * 100).toFixed(1)}%`);
+                }
+            }
+            if (data.learning_rate !== undefined) {
+                updateMetricDisplay('currentLR', data.learning_rate.toExponential(2));
+            }
+            if (data.eta !== undefined) {
+                updateMetricDisplay('trainingETA', data.eta);
+            }
+
+            // Add to chart
+            if (data.current_epoch !== undefined && data.train_loss !== undefined) {
+                addChartData(data.current_epoch, data.train_loss, data.val_loss, data.train_accuracy, data.val_accuracy);
+            }
+
+            // Update message
+            updateTrainingStatus('training', 'Training in Progress', data.message || `Epoch ${data.current_epoch}/${state.training.totalEpochs}`);
+
+            // Add log entries
+            if (data.logs) {
+                data.logs.forEach(log => addTrainingLog(log.level, log.message));
+            }
+
+        } else if (data.status === 'completed') {
+            clearInterval(state.training.statusCheckInterval);
+            state.training.isTraining = false;
+            state.training.modelPath = data.model_path;
+
+            updateTrainingStatus('completed', 'Training Complete!', `Final accuracy: ${(data.best_val_accuracy * 100).toFixed(1)}%`);
+            addTrainingLog('success', `Training completed! Best validation accuracy: ${(data.best_val_accuracy * 100).toFixed(1)}%`);
+
+            showTrainingSummary(data);
+            showToast('success', 'Training Complete', 'Your model is ready to use!');
+
+            elements.startTrainingBtn.disabled = false;
+            elements.stopTrainingBtn.disabled = true;
+
+        } else if (data.status === 'failed') {
+            clearInterval(state.training.statusCheckInterval);
+            state.training.isTraining = false;
+
+            updateTrainingStatus('error', 'Training Failed', data.error || 'An error occurred');
+            addTrainingLog('error', `Training failed: ${data.error}`);
+            showToast('error', 'Training Failed', data.error);
+
+            elements.startTrainingBtn.disabled = false;
+            elements.stopTrainingBtn.disabled = true;
+        }
+
+    } catch (error) {
+        console.error('Status check error:', error);
+    }
+}
+
+async function handleStopTraining() {
+    try {
+        const response = await fetch(`${API_BASE}/training/stop`, {
+            method: 'POST',
+        });
+
+        if (response.ok) {
+            clearInterval(state.training.statusCheckInterval);
+            state.training.isTraining = false;
+
+            updateTrainingStatus('error', 'Training Stopped', 'Training was stopped by user');
+            addTrainingLog('warning', 'Training stopped by user');
+            showToast('warning', 'Training Stopped', 'Training was stopped');
+
+            elements.startTrainingBtn.disabled = false;
+            elements.stopTrainingBtn.disabled = true;
+        }
+    } catch (error) {
+        showToast('error', 'Stop Failed', error.message);
+    }
+}
+
+function updateTrainingStatus(status, title, message) {
+    const banner = elements.trainingStatusBanner;
+    if (!banner) return;
+
+    banner.className = `training-status-banner ${status}`;
+
+    if (elements.trainingStatusTitle) {
+        elements.trainingStatusTitle.textContent = title;
+    }
+    if (elements.trainingStatusMessage) {
+        elements.trainingStatusMessage.textContent = message;
+    }
+
+    // Update icon based on status
+    const iconEl = elements.trainingStatusIcon;
+    if (iconEl) {
+        if (status === 'training') {
+            iconEl.innerHTML = `
+                <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <polyline points="12 6 12 12 16 14"/>
+                </svg>
+            `;
+        } else if (status === 'completed') {
+            iconEl.innerHTML = `
+                <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                    <polyline points="22 4 12 14.01 9 11.01"/>
+                </svg>
+            `;
+        } else if (status === 'error') {
+            iconEl.innerHTML = `
+                <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <line x1="15" y1="9" x2="9" y2="15"/>
+                    <line x1="9" y1="9" x2="15" y2="15"/>
+                </svg>
+            `;
+        }
+    }
+}
+
+function updateMetricDisplay(elementId, value) {
+    const el = elements[elementId];
+    if (el) el.textContent = value;
+}
+
+function addTrainingLog(level, message) {
+    const logEl = elements.trainingLog;
+    if (!logEl) return;
+
+    const timestamp = new Date().toLocaleTimeString();
+    const entry = document.createElement('div');
+    entry.className = `log-entry ${level}`;
+    entry.textContent = `[${timestamp}] ${message}`;
+
+    logEl.appendChild(entry);
+    logEl.scrollTop = logEl.scrollHeight;
+
+    state.training.logs.push({ level, message, timestamp });
+}
+
+function initTrainingChart() {
+    const canvas = elements.trainingChart;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext('2d');
+
+    // Simple line chart (without external library)
+    state.training.chartData = {
+        epochs: [],
+        trainLoss: [],
+        valLoss: [],
+        trainAcc: [],
+        valAcc: []
+    };
+
+    // Clear canvas
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Draw empty chart background
+    ctx.fillStyle = '#f8fafc';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.font = '12px Inter, sans-serif';
+    ctx.fillStyle = '#64748b';
+    ctx.textAlign = 'center';
+    ctx.fillText('Training metrics will appear here', canvas.width / 2, canvas.height / 2);
+}
+
+function addChartData(epoch, trainLoss, valLoss, trainAcc, valAcc) {
+    if (!state.training.chartData) return;
+
+    state.training.chartData.epochs.push(epoch);
+    state.training.chartData.trainLoss.push(trainLoss);
+    state.training.chartData.valLoss.push(valLoss);
+    state.training.chartData.trainAcc.push(trainAcc);
+    state.training.chartData.valAcc.push(valAcc);
+
+    drawTrainingChart();
+}
+
+function drawTrainingChart() {
+    const canvas = elements.trainingChart;
+    if (!canvas || !state.training.chartData) return;
+
+    const ctx = canvas.getContext('2d');
+    const data = state.training.chartData;
+    const padding = 50;
+    const width = canvas.width - padding * 2;
+    const height = canvas.height - padding * 2;
+
+    // Clear
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Background
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    if (data.epochs.length < 2) return;
+
+    // Draw axes
+    ctx.strokeStyle = '#e2e8f0';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(padding, padding);
+    ctx.lineTo(padding, canvas.height - padding);
+    ctx.lineTo(canvas.width - padding, canvas.height - padding);
+    ctx.stroke();
+
+    // Calculate scales
+    const maxLoss = Math.max(...data.trainLoss, ...data.valLoss) * 1.1;
+    const minLoss = Math.min(...data.trainLoss, ...data.valLoss) * 0.9;
+    const maxEpoch = Math.max(...data.epochs);
+
+    // Draw loss lines
+    const drawLine = (values, color) => {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+
+        values.forEach((val, i) => {
+            const x = padding + (data.epochs[i] / maxEpoch) * width;
+            const y = canvas.height - padding - ((val - minLoss) / (maxLoss - minLoss)) * height;
+
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        });
+
+        ctx.stroke();
+    };
+
+    drawLine(data.trainLoss, '#3b82f6');  // Blue for train loss
+    drawLine(data.valLoss, '#ef4444');     // Red for val loss
+
+    // Labels
+    ctx.font = '11px Inter, sans-serif';
+    ctx.fillStyle = '#64748b';
+    ctx.textAlign = 'center';
+    ctx.fillText('Epoch', canvas.width / 2, canvas.height - 10);
+
+    ctx.save();
+    ctx.translate(15, canvas.height / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillText('Loss', 0, 0);
+    ctx.restore();
+
+    // Legend
+    ctx.fillStyle = '#3b82f6';
+    ctx.fillRect(canvas.width - 100, 20, 15, 10);
+    ctx.fillStyle = '#64748b';
+    ctx.textAlign = 'left';
+    ctx.fillText('Train', canvas.width - 80, 28);
+
+    ctx.fillStyle = '#ef4444';
+    ctx.fillRect(canvas.width - 100, 35, 15, 10);
+    ctx.fillStyle = '#64748b';
+    ctx.fillText('Val', canvas.width - 80, 43);
+}
+
+function showTrainingSummary(data) {
+    // Show summary section
+    if (elements.trainingSummary) {
+        elements.trainingSummary.style.display = 'block';
+    }
+
+    // Show test section
+    if (elements.testSection) {
+        elements.testSection.style.display = 'block';
+    }
+
+    // Populate summary
+    if (elements.summaryContent) {
+        elements.summaryContent.innerHTML = `
+            <div class="summary-stat-item">
+                <div class="summary-stat-value">${(data.best_val_accuracy * 100).toFixed(1)}%</div>
+                <div class="summary-stat-label">Best Validation Accuracy</div>
+            </div>
+            <div class="summary-stat-item">
+                <div class="summary-stat-value">${data.total_epochs || state.training.totalEpochs}</div>
+                <div class="summary-stat-label">Epochs Trained</div>
+            </div>
+            <div class="summary-stat-item">
+                <div class="summary-stat-value">${data.training_time || '-'}</div>
+                <div class="summary-stat-label">Training Time</div>
+            </div>
+            <div class="summary-stat-item">
+                <div class="summary-stat-value">${data.model_size || '-'}</div>
+                <div class="summary-stat-label">Model Size</div>
+            </div>
+        `;
+    }
+}
+
+async function handleTestImage(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    // Show preview
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        if (elements.testImagePreview) {
+            elements.testImagePreview.src = e.target.result;
+        }
+        if (elements.testResults) {
+            elements.testResults.style.display = 'grid';
+        }
+    };
+    reader.readAsDataURL(file);
+
+    // Get prediction
+    const base64 = await fileToBase64(file);
+
+    try {
+        const response = await fetch(`${API_BASE}/training/test`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                image: base64,
+                model_path: state.training.modelPath
+            }),
+        });
+
+        const data = await response.json();
+
+        if (elements.testPredictions) {
+            elements.testPredictions.innerHTML = data.predictions.map((pred, i) => `
+                <div class="test-prediction-item ${i === 0 ? 'top' : ''}">
+                    <span class="prediction-name">${pred.class}</span>
+                    <div class="prediction-confidence">
+                        <div class="confidence-bar-container" style="width: 100px;">
+                            <div class="confidence-bar-fill" style="width: ${pred.confidence * 100}%"></div>
+                        </div>
+                        <span>${(pred.confidence * 100).toFixed(1)}%</span>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+    } catch (error) {
+        showToast('error', 'Test Failed', error.message);
+    }
+}
+
+async function handleDeployModel() {
+    if (!state.training.modelPath) {
+        showToast('error', 'No Model', 'No trained model available to deploy');
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/training/deploy`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model_path: state.training.modelPath }),
+        });
+
+        if (response.ok) {
+            showToast('success', 'Model Deployed', 'The trained model is now the default model');
+        } else {
+            throw new Error('Failed to deploy model');
+        }
+    } catch (error) {
+        showToast('error', 'Deploy Failed', error.message);
+    }
+}
+
+async function handleDownloadModel() {
+    if (!state.training.modelPath) {
+        showToast('error', 'No Model', 'No trained model available to download');
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/training/download`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model_path: state.training.modelPath }),
+        });
+
+        if (response.ok) {
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'trained_model.pt';
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            a.remove();
+        } else {
+            throw new Error('Failed to download model');
+        }
+    } catch (error) {
+        showToast('error', 'Download Failed', error.message);
+    }
+}
+
+async function handleExportToHF() {
+    if (!state.training.modelPath) {
+        showToast('error', 'No Model', 'No trained model available to export');
+        return;
+    }
+
+    const repoName = prompt('Enter HuggingFace repository name:', 'plant-disease-classifier');
+    if (!repoName) return;
+
+    try {
+        const response = await fetch(`${API_BASE}/training/export-hf`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                model_path: state.training.modelPath,
+                repo_name: repoName
+            }),
+        });
+
+        if (response.ok) {
+            const data = await response.json();
+            showToast('success', 'Export Complete', `Model exported to: ${data.repo_url}`);
+        } else {
+            throw new Error('Failed to export model');
+        }
+    } catch (error) {
+        showToast('error', 'Export Failed', error.message);
+    }
 }

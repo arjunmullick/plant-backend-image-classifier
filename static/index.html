@@ -35,6 +35,23 @@
         <!-- Mode Selection Tabs -->
         <div class="tabs-container">
             <div class="tabs">
+                <button class="tab" data-mode="compare">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="3" width="8" height="18" rx="1"/>
+                        <rect x="13" y="3" width="8" height="18" rx="1"/>
+                        <path d="M7 8h0M7 12h0M7 16h0"/>
+                        <path d="M17 8h0M17 12h0M17 16h0"/>
+                    </svg>
+                    Compare Models
+                </button>
+                <button class="tab" data-mode="early-warning">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                        <line x1="12" y1="9" x2="12" y2="13"/>
+                        <line x1="12" y1="17" x2="12.01" y2="17"/>
+                    </svg>
+                    Early Warning
+                </button>
                 <button class="tab active" data-mode="full">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <circle cx="12" cy="12" r="10"/>
@@ -64,22 +81,11 @@
                     </svg>
                     Batch (10 max)
                 </button>
-                <button class="tab" data-mode="compare">
+                <button class="tab" data-mode="training">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <rect x="3" y="3" width="8" height="18" rx="1"/>
-                        <rect x="13" y="3" width="8" height="18" rx="1"/>
-                        <path d="M7 8h0M7 12h0M7 16h0"/>
-                        <path d="M17 8h0M17 12h0M17 16h0"/>
+                        <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
                     </svg>
-                    Compare Models
-                </button>
-                <button class="tab" data-mode="early-warning">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-                        <line x1="12" y1="9" x2="12" y2="13"/>
-                        <line x1="12" y1="17" x2="12.01" y2="17"/>
-                    </svg>
-                    Early Warning
+                    Training
                 </button>
             </div>
         </div>
@@ -299,6 +305,140 @@
                                 <a href="https://www.kindwise.com/" target="_blank" class="api-key-link">Get key</a>
                             </div>
                         </div>
+                    </div>
+                </div>
+
+                <!-- Training Mode Panel -->
+                <div class="option-group training-option" id="trainingPanel" style="display: none;">
+                    <div class="training-intro">
+                        <h4>
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+                            </svg>
+                            Local Model Training
+                        </h4>
+                        <p>Train and fine-tune plant disease classification models locally on your Mac.</p>
+                    </div>
+
+                    <!-- Dataset Section -->
+                    <div class="training-section">
+                        <h5>1. Dataset</h5>
+                        <div class="dataset-status" id="datasetStatus">
+                            <div class="status-indicator checking">
+                                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="12" cy="12" r="10"/>
+                                </svg>
+                                <span>Checking dataset status...</span>
+                            </div>
+                        </div>
+                        <div class="dataset-actions">
+                            <button class="btn-secondary" id="downloadDatasetBtn">
+                                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                    <polyline points="7 10 12 15 17 10"/>
+                                    <line x1="12" y1="15" x2="12" y2="3"/>
+                                </svg>
+                                Download PlantVillage Dataset
+                            </button>
+                            <select id="datasetSelect" class="select-input">
+                                <option value="plantvillage">PlantVillage (54K images, 38 classes)</option>
+                                <option value="plantdoc">PlantDoc (2.5K real-world images)</option>
+                                <option value="custom">Custom Dataset</option>
+                            </select>
+                        </div>
+                        <div class="download-progress" id="downloadProgress" style="display: none;">
+                            <div class="progress-bar">
+                                <div class="progress-fill" id="downloadProgressFill"></div>
+                            </div>
+                            <span class="progress-text" id="downloadProgressText">0%</span>
+                        </div>
+                    </div>
+
+                    <!-- Training Configuration -->
+                    <div class="training-section">
+                        <h5>2. Training Configuration</h5>
+                        <div class="training-config-grid">
+                            <div class="config-item">
+                                <label for="baseModel">Base Model:</label>
+                                <select id="baseModel" class="select-input">
+                                    <option value="efficientnet_b0">EfficientNet-B0 (Fast, ~95% acc)</option>
+                                    <option value="efficientnet_b2">EfficientNet-B2 (Better, ~96% acc)</option>
+                                    <option value="resnet50">ResNet50 (Classic, ~95% acc)</option>
+                                    <option value="mobilenet_v2" selected>MobileNetV2 (Fastest, ~94% acc)</option>
+                                    <option value="vit_small">ViT-Small (Transformer, ~97% acc)</option>
+                                </select>
+                            </div>
+                            <div class="config-item">
+                                <label for="epochs">Epochs:</label>
+                                <input type="number" id="epochs" value="10" min="1" max="100" class="input-number">
+                            </div>
+                            <div class="config-item">
+                                <label for="batchSize">Batch Size:</label>
+                                <select id="batchSize" class="select-input">
+                                    <option value="8">8 (Low memory)</option>
+                                    <option value="16">16 (Recommended for Mac)</option>
+                                    <option value="32" selected>32 (Default)</option>
+                                    <option value="64">64 (High memory)</option>
+                                </select>
+                            </div>
+                            <div class="config-item">
+                                <label for="learningRate">Learning Rate:</label>
+                                <select id="learningRate" class="select-input">
+                                    <option value="0.0001" selected>1e-4 (Default)</option>
+                                    <option value="0.00001">1e-5 (Fine-tuning)</option>
+                                    <option value="0.001">1e-3 (Fast learning)</option>
+                                </select>
+                            </div>
+                            <div class="config-item">
+                                <label for="device">Device:</label>
+                                <select id="device" class="select-input">
+                                    <option value="auto" selected>Auto (MPS if available)</option>
+                                    <option value="mps">Apple Silicon GPU (MPS)</option>
+                                    <option value="cpu">CPU Only</option>
+                                </select>
+                            </div>
+                            <div class="config-item">
+                                <label for="augmentation">Data Augmentation:</label>
+                                <select id="augmentation" class="select-input">
+                                    <option value="standard" selected>Standard (Flip, Rotate, Color)</option>
+                                    <option value="aggressive">Aggressive (More variations)</option>
+                                    <option value="none">None</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="config-checkboxes">
+                            <label class="option-label">
+                                <input type="checkbox" id="enableWandb">
+                                <span class="checkbox-custom"></span>
+                                Enable Weights & Biases Logging
+                            </label>
+                            <label class="option-label">
+                                <input type="checkbox" id="saveCheckpoints" checked>
+                                <span class="checkbox-custom"></span>
+                                Save Checkpoints Every Epoch
+                            </label>
+                            <label class="option-label">
+                                <input type="checkbox" id="enableEarlyStopping" checked>
+                                <span class="checkbox-custom"></span>
+                                Early Stopping (patience=5)
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Training Actions -->
+                    <div class="training-actions">
+                        <button class="btn-primary btn-large" id="startTrainingBtn">
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                                <polygon points="5 3 19 12 5 21 5 3"/>
+                            </svg>
+                            Start Training
+                        </button>
+                        <button class="btn-secondary" id="stopTrainingBtn" disabled>
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="6" y="6" width="12" height="12"/>
+                            </svg>
+                            Stop
+                        </button>
                     </div>
                 </div>
             </div>
@@ -531,6 +671,158 @@
 
                 <!-- Processing Meta -->
                 <div class="ew-meta" id="ewMeta"></div>
+            </div>
+
+            <!-- Training Results -->
+            <div class="training-results" id="trainingResults" style="display: none;">
+                <!-- Training Status -->
+                <div class="training-status-banner" id="trainingStatusBanner">
+                    <div class="training-status-icon" id="trainingStatusIcon">
+                        <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/>
+                            <polyline points="12 6 12 12 16 14"/>
+                        </svg>
+                    </div>
+                    <div class="training-status-info">
+                        <h3 id="trainingStatusTitle">Training Status</h3>
+                        <p id="trainingStatusMessage">Initializing...</p>
+                    </div>
+                </div>
+
+                <!-- Live Metrics -->
+                <div class="training-section metrics-section">
+                    <h3>
+                        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="18" y1="20" x2="18" y2="10"/>
+                            <line x1="12" y1="20" x2="12" y2="4"/>
+                            <line x1="6" y1="20" x2="6" y2="14"/>
+                        </svg>
+                        Live Training Metrics
+                    </h3>
+                    <div class="metrics-grid" id="metricsGrid">
+                        <div class="metric-card">
+                            <div class="metric-label">Epoch</div>
+                            <div class="metric-value" id="currentEpoch">0/0</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-label">Train Loss</div>
+                            <div class="metric-value" id="trainLoss">-</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-label">Train Accuracy</div>
+                            <div class="metric-value" id="trainAccuracy">-</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-label">Val Loss</div>
+                            <div class="metric-value" id="valLoss">-</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-label">Val Accuracy</div>
+                            <div class="metric-value" id="valAccuracy">-</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-label">Best Val Acc</div>
+                            <div class="metric-value" id="bestValAccuracy">-</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-label">Learning Rate</div>
+                            <div class="metric-value" id="currentLR">-</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-label">ETA</div>
+                            <div class="metric-value" id="trainingETA">-</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Training Progress Chart -->
+                <div class="training-section chart-section">
+                    <h3>
+                        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+                        </svg>
+                        Training Progress
+                    </h3>
+                    <div class="chart-container">
+                        <canvas id="trainingChart" width="600" height="300"></canvas>
+                    </div>
+                </div>
+
+                <!-- Training Log -->
+                <div class="training-section log-section">
+                    <h3>
+                        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                            <polyline points="14 2 14 8 20 8"/>
+                            <line x1="16" y1="13" x2="8" y2="13"/>
+                            <line x1="16" y1="17" x2="8" y2="17"/>
+                        </svg>
+                        Training Log
+                    </h3>
+                    <div class="training-log" id="trainingLog">
+                        <div class="log-entry">Waiting for training to start...</div>
+                    </div>
+                </div>
+
+                <!-- Model Testing Section -->
+                <div class="training-section test-section" id="testSection" style="display: none;">
+                    <h3>
+                        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
+                        </svg>
+                        Test Trained Model
+                    </h3>
+                    <div class="test-upload-area" id="testUploadArea">
+                        <div class="test-upload-content">
+                            <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                <polyline points="17 8 12 3 7 8"/>
+                                <line x1="12" y1="3" x2="12" y2="15"/>
+                            </svg>
+                            <p>Drop an image here to test with trained model</p>
+                        </div>
+                        <input type="file" id="testFileInput" accept="image/*" hidden>
+                    </div>
+                    <div class="test-results" id="testResults" style="display: none;">
+                        <div class="test-image-preview">
+                            <img id="testImagePreview" alt="Test image">
+                        </div>
+                        <div class="test-predictions" id="testPredictions"></div>
+                    </div>
+                </div>
+
+                <!-- Training Summary (shown after completion) -->
+                <div class="training-section summary-section" id="trainingSummary" style="display: none;">
+                    <h3>
+                        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                            <polyline points="22 4 12 14.01 9 11.01"/>
+                        </svg>
+                        Training Complete
+                    </h3>
+                    <div class="summary-content" id="summaryContent"></div>
+                    <div class="summary-actions">
+                        <button class="btn-primary" id="deployModelBtn">
+                            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                <polyline points="17 8 12 3 7 8"/>
+                                <line x1="12" y1="3" x2="12" y2="15"/>
+                            </svg>
+                            Deploy as Default Model
+                        </button>
+                        <button class="btn-secondary" id="downloadModelBtn">
+                            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                <polyline points="7 10 12 15 17 10"/>
+                                <line x1="12" y1="15" x2="12" y2="3"/>
+                            </svg>
+                            Download Model
+                        </button>
+                        <button class="btn-secondary" id="exportToHFBtn">
+                            Export to HuggingFace
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
 

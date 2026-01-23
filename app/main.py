@@ -25,7 +25,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.openapi.utils import get_openapi
 
 from app.core.config import get_settings
-from app.api.routes import classify_router, health_router
+from app.api.routes import classify_router, health_router, training_router
 from app.api.routes.health import set_startup_time
 from app.services.classification_service import get_classification_service
 
@@ -153,6 +153,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 # Include routers
 app.include_router(health_router, prefix=settings.api_prefix)
 app.include_router(classify_router, prefix=settings.api_prefix)
+app.include_router(training_router, prefix=settings.api_prefix)
 
 
 # Static files directory
@@ -215,6 +216,10 @@ def custom_openapi():
         {
             "name": "Health",
             "description": "Health check and system status endpoints"
+        },
+        {
+            "name": "training",
+            "description": "Local model training endpoints - download datasets, train models, test and deploy"
         },
         {
             "name": "Root",
