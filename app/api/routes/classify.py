@@ -693,6 +693,9 @@ class TreatmentResponse(BaseModel):
     estimated_recovery: str
     regional_notes: Optional[str] = None
     weather_considerations: Optional[str] = None
+    data_source: Optional[str] = None
+    data_source_url: Optional[str] = None
+    is_fallback: bool = False
 
 
 class EarlyWarningResponse(BaseModel):
@@ -809,7 +812,10 @@ async def early_warning_analysis(
                 monitoring_schedule=result.treatment.monitoring_schedule,
                 estimated_recovery=result.treatment.estimated_recovery,
                 regional_notes=result.treatment.regional_notes,
-                weather_considerations=result.treatment.weather_considerations
+                weather_considerations=result.treatment.weather_considerations,
+                data_source=result.treatment.data_source,
+                data_source_url=getattr(result.treatment, 'data_source_url', None),
+                is_fallback=result.treatment.is_fallback
             ),
             metadata=result.metadata
         )

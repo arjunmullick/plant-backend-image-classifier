@@ -900,7 +900,9 @@ function displayEWTreatment(treatment) {
                         <line x1="16" y1="17" x2="8" y2="17"/>
                         <polyline points="10 9 9 9 8 9"/>
                     </svg>
-                    <span><strong>Data Source:</strong> ${treatment.data_source}</span>
+                    <span><strong>Data Source:</strong> ${treatment.data_source_url
+                        ? `<a href="${treatment.data_source_url}" target="_blank" rel="noopener noreferrer">${treatment.data_source}</a>`
+                        : treatment.data_source}</span>
                 </div>
             ` : ''}
             <div class="treatment-meta-grid">
@@ -1499,6 +1501,26 @@ function displayTreatment(treatment) {
         regionNotes.style.display = 'block';
     } else {
         regionNotes.style.display = 'none';
+    }
+
+    // Data source attribution
+    const dataSource = document.getElementById('treatmentDataSource');
+    if (treatment.data_source) {
+        const sourceLink = treatment.data_source_url
+            ? `<a href="${treatment.data_source_url}" target="_blank" rel="noopener noreferrer">${treatment.data_source}</a>`
+            : treatment.data_source;
+        dataSource.innerHTML = `
+            <div class="data-source-attribution">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+                    <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+                </svg>
+                <span><strong>Source:</strong> ${sourceLink}</span>
+            </div>
+        `;
+        dataSource.style.display = 'block';
+    } else {
+        dataSource.style.display = 'none';
     }
 }
 

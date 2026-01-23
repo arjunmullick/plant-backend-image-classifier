@@ -938,6 +938,43 @@ body {
     color: var(--color-info);
 }
 
+/* Data Source Attribution */
+.data-source {
+    margin-top: var(--space-md);
+    padding: var(--space-sm) var(--space-md);
+    background: var(--color-bg-tertiary);
+    border-radius: var(--radius-md);
+    border-left: 3px solid var(--color-primary);
+}
+
+.data-source-attribution {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    font-size: 0.8rem;
+    color: var(--color-text-muted);
+}
+
+.data-source-attribution svg {
+    flex-shrink: 0;
+    color: var(--color-primary);
+}
+
+.data-source-attribution strong {
+    color: var(--color-text-secondary);
+}
+
+.data-source-attribution a {
+    color: var(--color-primary);
+    text-decoration: none;
+    transition: color 0.2s ease;
+}
+
+.data-source-attribution a:hover {
+    color: var(--color-primary-dark);
+    text-decoration: underline;
+}
+
 /* Explainability Card Specific */
 .explain-card .card-header svg {
     color: var(--color-secondary);
@@ -2503,6 +2540,18 @@ body {
     background: linear-gradient(135deg, #fff3cd 0%, #ffeeba 100%);
     color: #856404;
     border: 1px solid #ffca2c;
+}
+
+.data-source-info a {
+    color: var(--color-primary);
+    text-decoration: none;
+    font-weight: 500;
+    transition: color 0.2s ease;
+}
+
+.data-source-info a:hover {
+    color: var(--color-primary-dark);
+    text-decoration: underline;
 }
 
 .treatment-item-ew.fallback-item {

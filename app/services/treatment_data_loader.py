@@ -39,6 +39,7 @@ class TreatmentData:
     monitoring_schedule: str = ""
     estimated_recovery: str = ""
     data_source: str = "Unknown"
+    data_source_url: Optional[str] = None
     is_fallback: bool = False
 
 
@@ -172,6 +173,7 @@ class TreatmentDataLoader:
                     monitoring_schedule=disease_data.get("monitoring_schedule", ""),
                     estimated_recovery=disease_data.get("estimated_recovery", ""),
                     data_source=disease_data.get("data_source", "Unknown"),
+                    data_source_url=disease_data.get("data_source_url"),
                     is_fallback=False
                 )
 

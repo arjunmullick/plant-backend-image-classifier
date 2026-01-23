@@ -188,6 +188,14 @@ class TreatmentRecommendation(BaseModel):
         default=None,
         description="Region-specific treatment considerations"
     )
+    data_source: Optional[str] = Field(
+        default=None,
+        description="Name of the database or dataset source for treatment data"
+    )
+    data_source_url: Optional[str] = Field(
+        default=None,
+        description="URL or reference link to the data source"
+    )
 
 
 # === Explainability Schemas ===
@@ -288,7 +296,9 @@ class ClassificationResponse(BaseModel):
                 "treatment": {
                     "organic": ["Neem oil spray", "Remove infected leaves"],
                     "chemical": ["Chlorothalonil (follow label instructions)"],
-                    "prevention": ["Avoid overhead watering", "Rotate crops"]
+                    "prevention": ["Avoid overhead watering", "Rotate crops"],
+                    "data_source": "PlantVillage Dataset & Agricultural Extension Services",
+                    "data_source_url": "https://plantvillage.psu.edu/"
                 },
                 "explainability": {
                     "model_reasoning": "Lesion pattern and leaf discoloration matched Early Blight training examples",

@@ -96,6 +96,7 @@ class LocalizedTreatment:
     regional_notes: Optional[str] = None
     weather_considerations: Optional[str] = None
     data_source: str = "Unknown"
+    data_source_url: Optional[str] = None
     is_fallback: bool = False  # True if treatment data not found in database
 
 
@@ -523,6 +524,7 @@ class EarlyWarningService:
             regional_notes=regional_notes,
             weather_considerations="Monitor weather forecasts - humid conditions increase disease spread" if not is_fallback else "Consult local agricultural extension for weather-specific advice",
             data_source=treatment_data.data_source,
+            data_source_url=treatment_data.data_source_url,
             is_fallback=is_fallback
         )
 

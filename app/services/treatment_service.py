@@ -53,6 +53,8 @@ class TreatmentPlan:
     urgency: str  # immediate, soon, routine
     estimated_recovery_time: str
     notes: str = ""
+    data_source: str = "PlantVillage Dataset & Agricultural Extension Services"
+    data_source_url: str = "https://plantvillage.psu.edu/"
 
 
 class TreatmentDatabase:
@@ -552,6 +554,8 @@ class TreatmentRecommendationService:
             ) if treatment_plan.cultural else None,
             "urgency": self._adjust_urgency(treatment_plan.urgency, severity),
             "region_specific_notes": self._get_region_notes(regulation, disease),
+            "data_source": treatment_plan.data_source,
+            "data_source_url": treatment_plan.data_source_url,
         }
 
         # Filter out None values
@@ -638,7 +642,9 @@ class TreatmentRecommendationService:
             "region_specific_notes": (
                 f"No specific treatment plan found for '{disease}'. "
                 "Please consult local agricultural extension services for targeted recommendations."
-            )
+            ),
+            "data_source": "General Agricultural Best Practices",
+            "data_source_url": "https://www.usda.gov/",
         }
 
     def add_disease_treatment(self, treatment_plan: TreatmentPlan) -> None:
